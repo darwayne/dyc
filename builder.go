@@ -85,6 +85,19 @@ func (s *Builder) ScanIterate(ctx context.Context, fn func(output *dynamodb.Scan
 	return s.client.ScanIterator(ctx, &query, fn)
 }
 
+func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(output *dynamodb.ScanOutput) error) error {
+	if s.err != nil {
+		return s.err
+	}
+	if s.client == nil {
+		return errors.New("client not set")
+	}
+
+	query, _ := s.ToScan()
+
+	return s.client.ParallelScanIterator(ctx, &query, workers, fn)
+}
+
 func (s *Builder) QueryDelete(ctx context.Context, keyFn KeyExtractor) error {
 	if s.err != nil {
 		return s.err
