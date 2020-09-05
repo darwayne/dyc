@@ -50,6 +50,10 @@ func (c *Client) BatchWriter(ctx context.Context, tableName string, requests ...
 	return totalWritten, nil
 }
 
+func (c *Client) Builder() *Builder {
+	return NewBuilder().Client(c)
+}
+
 func (c *Client) QueryIterator(ctx context.Context, input *dynamodb.QueryInput, fn func(output *dynamodb.QueryOutput) error) error {
 	var pageError error
 	err := c.DynamoDB.QueryPagesWithContext(ctx, input, func(output *dynamodb.QueryOutput, b bool) bool {
