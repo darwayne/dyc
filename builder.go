@@ -123,7 +123,7 @@ func (s *Builder) QueryDelete(ctx context.Context, keyFn KeyExtractor) error {
 	return s.client.QueryDeleter(ctx, s.table, &query, keyFn)
 }
 
-// QueryDelete deletes all records matching the scan.
+// ScanDelete deletes all records matching the scan.
 // note: you must provide a function that will select the relevant Key fields needed for deletion
 func (s *Builder) ScanDelete(ctx context.Context, keyFn KeyExtractor) error {
 	if s.err != nil {
@@ -250,6 +250,7 @@ func (s *Builder) Limit(limit int) *Builder {
 	return s
 }
 
+// Index sets the index to use
 func (s *Builder) Index(index string) *Builder {
 	if s.err != nil {
 		return s

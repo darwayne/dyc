@@ -15,6 +15,7 @@ type Client struct {
 	*dynamodb.DynamoDB
 }
 
+// NewClient creates a new dyc client
 func NewClient(db *dynamodb.DynamoDB) *Client {
 	return &Client{DynamoDB: db}
 }
@@ -190,7 +191,7 @@ func (c *Client) QueryDeleter(ctx context.Context, table string, input *dynamodb
 	return nil
 }
 
-// ScanDelete deletes all records that match the scan query
+// ScanDeleter deletes all records that match the scan query
 func (c *Client) ScanDeleter(ctx context.Context, table string, input *dynamodb.ScanInput, keyFn KeyExtractor) error {
 	err := c.ScanIterator(ctx, input, func(out *dynamodb.ScanOutput) error {
 		requests := make([]*dynamodb.WriteRequest, 0, len(out.Items))
@@ -257,11 +258,12 @@ func (c *Client) BatchGetIterator(ctx context.Context, input *dynamodb.BatchGetI
 	return nil
 }
 
-// ExTractFields extracts fields from a map of dynamo attribute values
+// ExtractFields extracts fields from a map of dynamo attribute values
 func (c *Client) ExtractFields(data map[string]*dynamodb.AttributeValue, fields ...string) map[string]*dynamodb.AttributeValue {
 	return extractFields(data, fields...)
 }
 
+// ToBatchGetItemInput converts an array of mapped dynamo attributes to a batch get item input
 func (c *Client) ToBatchGetItemInput(tableName string, req []map[string]*dynamodb.AttributeValue) *dynamodb.BatchGetItemInput {
 	return &dynamodb.BatchGetItemInput{RequestItems: map[string]*dynamodb.KeysAndAttributes{
 		tableName: {
