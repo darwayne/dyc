@@ -2,7 +2,6 @@ package dyc
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 	"text/scanner"
@@ -263,11 +262,12 @@ func (s *Builder) scan(query string, inputs ...interface{}) (updatedQuery string
 			c.WriteString(num)
 
 			col := c.String()
-			s.cols[col] = &val
+			value := strings.Trim(val, `'`)
+			s.cols[col] = &value
 			builder.WriteString(col)
 		case '?':
 			s.valColsIdx++
-			if len(inputs) <= (s.valColsIdx - start) {
+			if len(inputs) <= (s.valColsIdx - start - 1) {
 				return "", errors.New("inputs don't match query")
 			}
 			var c strings.Builder
@@ -277,14 +277,13 @@ func (s *Builder) scan(query string, inputs ...interface{}) (updatedQuery string
 			c.WriteString(num)
 
 			col := c.String()
-			attr, err := typeToAttributeVal(inputs[s.valColsIdx-start])
+			attr, err := typeToAttributeVal(inputs[s.valColsIdx-start-1])
 			if err != nil {
 				return "", err
 			}
 			s.vals[col] = attr
 			builder.WriteString(col)
 		default:
-			fmt.Println(tok, sc.TokenText())
 			builder.WriteString(sc.TokenText())
 		}
 	}

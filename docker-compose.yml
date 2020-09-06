@@ -1,0 +1,19 @@
+version: "3"
+services:
+
+  dynamo:
+    image: "amazon/dynamodb-local:1.13.1"
+    command: -jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/
+    restart: always
+    volumes:
+      - dynamodb:/home/dynamodblocal/
+    ports:
+      - 8000
+    networks:
+      - local
+
+volumes:
+  aws:
+  dynamodb:
+networks:
+  local:
