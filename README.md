@@ -1,6 +1,9 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/darwayne/dyc)](https://goreportcard.com/report/github.com/darwayne/dyc)
 [![GoDoc](https://godoc.org/github.com/darwayne/dyc?status.svg)](https://godoc.org/github.com/darwayne/dyc)
+![license](https://img.shields.io/github/license/darwayne/dyc)
 # dyc
+
+![image](https://user-images.githubusercontent.com/2807589/92316080-1184e180-efbd-11ea-96a4-df774348ad67.png)
 
 
 ## Examples
