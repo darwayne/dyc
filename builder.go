@@ -26,6 +26,7 @@ type Builder struct {
 	client          *Client
 }
 
+// NewBuilder creates a new builder
 func NewBuilder() *Builder {
 	return &Builder{
 		valColsIdx: -1,

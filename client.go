@@ -19,6 +19,7 @@ func NewClient(db *dynamodb.DynamoDB) *Client {
 	return &Client{DynamoDB: db}
 }
 
+// BatchWriter batch writes an array of write requests to a table
 func (c *Client) BatchWriter(ctx context.Context, tableName string, requests ...*dynamodb.WriteRequest) (int, error) {
 	totalWritten := 0
 	chunks := c.ChunkWriteRequests(requests)
@@ -50,10 +51,12 @@ func (c *Client) BatchWriter(ctx context.Context, tableName string, requests ...
 	return totalWritten, nil
 }
 
+// Builder produces a builder configured with the current client
 func (c *Client) Builder() *Builder {
 	return NewBuilder().Client(c)
 }
 
+// QueryIterator iterates all results of a query
 func (c *Client) QueryIterator(ctx context.Context, input *dynamodb.QueryInput, fn func(output *dynamodb.QueryOutput) error) error {
 	var pageError error
 	err := c.DynamoDB.QueryPagesWithContext(ctx, input, func(output *dynamodb.QueryOutput, b bool) bool {
@@ -142,6 +145,7 @@ func (c *Client) ParallelScanIterator(ctx context.Context, input *dynamodb.ScanI
 	return nil
 }
 
+// ScanIterator iterates all results of a scan
 func (c *Client) ScanIterator(ctx context.Context, input *dynamodb.ScanInput, fn func(output *dynamodb.ScanOutput) error) error {
 	var pageError error
 	err := c.DynamoDB.ScanPagesWithContext(ctx, input, func(output *dynamodb.ScanOutput, b bool) bool {
@@ -160,6 +164,7 @@ func (c *Client) ScanIterator(ctx context.Context, input *dynamodb.ScanInput, fn
 	return nil
 }
 
+// QueryDeleter deletes all records that match the query
 func (c *Client) QueryDeleter(ctx context.Context, table string, input *dynamodb.QueryInput, keyFn KeyExtractor) error {
 	err := c.QueryIterator(ctx, input, func(out *dynamodb.QueryOutput) error {
 		requests := make([]*dynamodb.WriteRequest, 0, len(out.Items))
@@ -185,6 +190,7 @@ func (c *Client) QueryDeleter(ctx context.Context, table string, input *dynamodb
 	return nil
 }
 
+// ScanDelete deletes all records that match the scan query
 func (c *Client) ScanDeleter(ctx context.Context, table string, input *dynamodb.ScanInput, keyFn KeyExtractor) error {
 	err := c.ScanIterator(ctx, input, func(out *dynamodb.ScanOutput) error {
 		requests := make([]*dynamodb.WriteRequest, 0, len(out.Items))
@@ -210,6 +216,7 @@ func (c *Client) ScanDeleter(ctx context.Context, table string, input *dynamodb.
 	return nil
 }
 
+// BatchGetIterator retrieves all items from the batch get input
 func (c *Client) BatchGetIterator(ctx context.Context, input *dynamodb.BatchGetItemInput, fn func(output *dynamodb.GetItemOutput) error) error {
 	var pageError error
 	err := c.DynamoDB.BatchGetItemPagesWithContext(ctx, input, func(output *dynamodb.BatchGetItemOutput, b bool) bool {
@@ -250,6 +257,7 @@ func (c *Client) BatchGetIterator(ctx context.Context, input *dynamodb.BatchGetI
 	return nil
 }
 
+// ExTractFields extracts fields from a map of dynamo attribute values
 func (c *Client) ExtractFields(data map[string]*dynamodb.AttributeValue, fields ...string) map[string]*dynamodb.AttributeValue {
 	return extractFields(data, fields...)
 }
@@ -262,6 +270,7 @@ func (c *Client) ToBatchGetItemInput(tableName string, req []map[string]*dynamod
 	}}
 }
 
+// ChunkWriteRequests chunks write requests into batches of 25 (the current maximum size in AWS)
 func (c *Client) ChunkWriteRequests(requests []*dynamodb.WriteRequest) [][]*dynamodb.WriteRequest {
 	chunkSize := 25
 	results := make([][]*dynamodb.WriteRequest, 0, len(requests)/chunkSize)
