@@ -8,6 +8,12 @@ func PKSKExtractor(attrs map[string]*dynamodb.AttributeValue) map[string]*dynamo
 	return extractFields(attrs, "PK", "SK")
 }
 
+func FieldsExtractor(fields ...string) KeyExtractor {
+	return func(m map[string]*dynamodb.AttributeValue) map[string]*dynamodb.AttributeValue {
+		return extractFields(m, fields...)
+	}
+}
+
 func extractFields(data map[string]*dynamodb.AttributeValue, fields ...string) map[string]*dynamodb.AttributeValue {
 	result := make(map[string]*dynamodb.AttributeValue, len(fields))
 

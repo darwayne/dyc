@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Builder allows you to build dynamo queries in a more convenient fashion
 type Builder struct {
 	colsIdx         int
 	valColsIdx      int
@@ -33,7 +34,8 @@ func NewBuilder() *Builder {
 	}
 }
 
-// WhereKey is equivalent to key condition
+// WhereKey allows you do make a key expression
+// e.g WhereKey("'MyKey' = ?", "yourKey")
 func (s *Builder) WhereKey(query string, vals ...interface{}) *Builder {
 	if s.err != nil {
 		return s
@@ -43,6 +45,7 @@ func (s *Builder) WhereKey(query string, vals ...interface{}) *Builder {
 }
 
 // Where is equivalent to a filter expression
+// e.g Where("'Hey' = ? AND 'Test'.'Nested'" = ?, "yo", true)
 func (s *Builder) Where(query string, vals ...interface{}) *Builder {
 	if s.err != nil {
 		return s
@@ -51,6 +54,7 @@ func (s *Builder) Where(query string, vals ...interface{}) *Builder {
 	return s
 }
 
+// Client sets client that will be used for client operations based on built object
 func (s *Builder) Client(client *Client) *Builder {
 	if s.err != nil {
 		return s
@@ -59,6 +63,8 @@ func (s *Builder) Client(client *Client) *Builder {
 	return s
 }
 
+// QueryIterate allows you to query dynamo based on the built object.
+// the fn parameter will be called as often as needed to retrieve all results
 func (s *Builder) QueryIterate(ctx context.Context, fn func(output *dynamodb.QueryOutput) error) error {
 	if s.err != nil {
 		return s.err
@@ -71,6 +77,8 @@ func (s *Builder) QueryIterate(ctx context.Context, fn func(output *dynamodb.Que
 	return s.client.QueryIterator(ctx, &query, fn)
 }
 
+// ScanIterate allows you to query dynamo based on the built object.
+// the fn parameter will be called as often as needed to retrieve all results
 func (s *Builder) ScanIterate(ctx context.Context, fn func(output *dynamodb.ScanOutput) error) error {
 	if s.err != nil {
 		return s.err
@@ -84,6 +92,8 @@ func (s *Builder) ScanIterate(ctx context.Context, fn func(output *dynamodb.Scan
 	return s.client.ScanIterator(ctx, &query, fn)
 }
 
+// ParallelScanIterate allows you to do a parallel scan in dynamo based on the built object.
+// the fn parameter will be called as often as needed to retrieve all results
 func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(output *dynamodb.ScanOutput) error) error {
 	if s.err != nil {
 		return s.err
@@ -97,6 +107,8 @@ func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(
 	return s.client.ParallelScanIterator(ctx, &query, workers, fn)
 }
 
+// QueryDelete deletes all records matching the query.
+// note: you must provide a function that will select the relevant Key fields needed for deletion
 func (s *Builder) QueryDelete(ctx context.Context, keyFn KeyExtractor) error {
 	if s.err != nil {
 		return s.err
@@ -110,6 +122,8 @@ func (s *Builder) QueryDelete(ctx context.Context, keyFn KeyExtractor) error {
 	return s.client.QueryDeleter(ctx, s.table, &query, keyFn)
 }
 
+// QueryDelete deletes all records matching the scan.
+// note: you must provide a function that will select the relevant Key fields needed for deletion
 func (s *Builder) ScanDelete(ctx context.Context, keyFn KeyExtractor) error {
 	if s.err != nil {
 		return s.err
@@ -123,6 +137,7 @@ func (s *Builder) ScanDelete(ctx context.Context, keyFn KeyExtractor) error {
 	return s.client.ScanDeleter(ctx, s.table, &query, keyFn)
 }
 
+// ToQuery produces a dynamodb.QueryInput value based on configured builder
 func (s *Builder) ToQuery() (dynamodb.QueryInput, error) {
 	if s.err != nil {
 		return dynamodb.QueryInput{}, s.err
@@ -160,6 +175,7 @@ func (s *Builder) ToQuery() (dynamodb.QueryInput, error) {
 	return query, nil
 }
 
+// ToScan produces a dynamodb.ScanInput value based on configured builder
 func (s *Builder) ToScan() (dynamodb.ScanInput, error) {
 	if s.err != nil {
 		return dynamodb.ScanInput{}, s.err
@@ -193,6 +209,7 @@ func (s *Builder) ToScan() (dynamodb.ScanInput, error) {
 	return query, nil
 }
 
+// ToGet produces a dynamodb.GetItemInput value based on configured builder
 func (s *Builder) ToGet() (dynamodb.GetItemInput, error) {
 	if s.err != nil {
 		return dynamodb.GetItemInput{}, s.err
@@ -214,6 +231,7 @@ func (s *Builder) ToGet() (dynamodb.GetItemInput, error) {
 	return query, nil
 }
 
+// Table sets the table name
 func (s *Builder) Table(tbl string) *Builder {
 	if s.err != nil {
 		return s
@@ -222,6 +240,7 @@ func (s *Builder) Table(tbl string) *Builder {
 	return s
 }
 
+// Limit sets the limit for results
 func (s *Builder) Limit(limit int) *Builder {
 	if s.err != nil {
 		return s
@@ -238,6 +257,10 @@ func (s *Builder) Index(index string) *Builder {
 	return s
 }
 
+// scan takes an input and produces a parsed version with relevant colNames and values set on the builder object
+// e.g scan("'myField' = ?", 1.0)
+// produces -> "#1 = :1"
+// and sets #1 and :1 appropriately
 func (s *Builder) scan(query string, inputs ...interface{}) (updatedQuery string, err error) {
 	var builder strings.Builder
 	builder.Grow(len(query))
