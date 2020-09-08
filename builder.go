@@ -13,17 +13,21 @@ import (
 
 // Builder allows you to build dynamo queries in a more convenient fashion
 type Builder struct {
-	colsIdx         int
-	valColsIdx      int
-	cols            map[string]*string
-	vals            map[string]*dynamodb.AttributeValue
-	err             error
-	filterExpresion string
-	keyExpression   string
-	table           string
-	index           string
-	limit           int
-	client          *Client
+	colsIdx             int
+	valColsIdx          int
+	cols                map[string]*string
+	vals                map[string]*dynamodb.AttributeValue
+	keys                map[string]*dynamodb.AttributeValue
+	err                 error
+	filterExpresion     string
+	keyExpression       string
+	conditionExpression string
+	table               string
+	index               string
+	limit               int
+	ascending           *bool
+	consistent          *bool
+	client              *Client
 }
 
 // NewBuilder creates a new builder
@@ -32,7 +36,56 @@ func NewBuilder() *Builder {
 		valColsIdx: -1,
 		cols:       make(map[string]*string),
 		vals:       make(map[string]*dynamodb.AttributeValue),
+		keys:       make(map[string]*dynamodb.AttributeValue),
 	}
+}
+
+// Key allows you to set the key for a given item
+// e.g Key("PK", "hello", "SK", "there")
+func (s *Builder) Key(keyName string, value interface{}, additionalKVs ...interface{}) *Builder {
+	if s.err != nil {
+		return s
+	}
+
+	var firstVal *dynamodb.AttributeValue
+	firstVal, s.err = typeToAttributeVal(value)
+	if s.err != nil {
+		return s
+	}
+
+	s.keys[keyName] = firstVal
+	if len(additionalKVs) > 0 && (len(additionalKVs)%2) != 0 {
+		s.err = errors.New("expected an even amount of additionalKVs parameters")
+		return s
+	}
+
+	for i := 0; i < len(additionalKVs); i += 2 {
+		k, ok := additionalKVs[i].(string)
+		if !ok {
+			s.err = errors.New("strings are the only type of keys supported")
+			return s
+		}
+
+		var val *dynamodb.AttributeValue
+		val, s.err = typeToAttributeVal(additionalKVs[i+1])
+		if s.err != nil {
+			return s
+		}
+
+		s.keys[k] = val
+	}
+
+	return s
+}
+
+// Condition allows you do make a condition expression
+// e.g Condition("'MyKey' = ?", "yourKey")
+func (s *Builder) Condition(query string, vals ...interface{}) *Builder {
+	if s.err != nil {
+		return s
+	}
+	s.conditionExpression, s.err = s.scan(query, vals...)
+	return s
 }
 
 // WhereKey allows you do make a key expression
@@ -62,6 +115,57 @@ func (s *Builder) Client(client *Client) *Builder {
 	}
 	s.client = client
 	return s
+}
+
+// Sort sets sort as either ascending or descending
+func (s *Builder) Sort(ascending bool) *Builder {
+	if s.err != nil {
+		return s
+	}
+
+	s.ascending = aws.Bool(ascending)
+
+	return s
+}
+
+// ConsistentRead sets the consistent read flag
+func (s *Builder) ConsistentRead(consistent bool) *Builder {
+	if s.err != nil {
+		return s
+	}
+
+	s.consistent = aws.Bool(consistent)
+
+	return s
+}
+
+// GetItem builds and runs a query using info in key and table
+func (s *Builder) GetItem(ctx context.Context) (*dynamodb.GetItemOutput, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.client == nil {
+		return nil, errors.New("client must be set")
+	}
+
+	input, _ := s.ToGet()
+	output, err := s.client.GetItemWithContext(ctx, &input)
+
+	return output, err
+}
+
+// DeleteItem deletes a single item utilizing data set via Table, Keys and Condition method calls
+func (s *Builder) DeleteItem(ctx context.Context) (*dynamodb.DeleteItemOutput, error) {
+	input, err := s.ToDelete()
+	if err != nil {
+		return nil, err
+	}
+
+	if s.client == nil {
+		return nil, errors.New("client must be set")
+	}
+
+	return s.client.DeleteItemWithContext(ctx, &input)
 }
 
 // QueryIterate allows you to query dynamo based on the built object.
@@ -138,6 +242,36 @@ func (s *Builder) ScanDelete(ctx context.Context, keyFn KeyExtractor) error {
 	return s.client.ScanDeleter(ctx, s.table, &query, keyFn)
 }
 
+// ToDelete produces a dynamodb.DeleteItemInput value based on configured builder
+func (s *Builder) ToDelete() (dynamodb.DeleteItemInput, error) {
+	if s.err != nil {
+		return dynamodb.DeleteItemInput{}, s.err
+	}
+
+	if len(s.keys) == 0 {
+		return dynamodb.DeleteItemInput{}, errors.New("key required to create a delete request")
+	}
+
+	var request dynamodb.DeleteItemInput
+	request.Key = s.keys
+	if s.table != "" {
+		request.TableName = aws.String(s.table)
+	}
+
+	if s.conditionExpression != "" {
+		request.ConditionExpression = aws.String(s.conditionExpression)
+	}
+
+	if len(s.vals) > 0 {
+		request.ExpressionAttributeValues = s.vals
+	}
+	if len(s.cols) > 0 {
+		request.ExpressionAttributeNames = s.cols
+	}
+
+	return request, nil
+}
+
 // ToQuery produces a dynamodb.QueryInput value based on configured builder
 func (s *Builder) ToQuery() (dynamodb.QueryInput, error) {
 	if s.err != nil {
@@ -171,6 +305,14 @@ func (s *Builder) ToQuery() (dynamodb.QueryInput, error) {
 
 	if s.table != "" {
 		query.TableName = aws.String(s.table)
+	}
+
+	if s.ascending != nil {
+		query.ScanIndexForward = s.ascending
+	}
+
+	if s.consistent != nil {
+		query.ConsistentRead = s.consistent
 	}
 
 	return query, nil
@@ -207,6 +349,10 @@ func (s *Builder) ToScan() (dynamodb.ScanInput, error) {
 		query.TableName = aws.String(s.table)
 	}
 
+	if s.consistent != nil {
+		query.ConsistentRead = s.consistent
+	}
+
 	return query, nil
 }
 
@@ -217,16 +363,17 @@ func (s *Builder) ToGet() (dynamodb.GetItemInput, error) {
 	}
 
 	var query dynamodb.GetItemInput
-	if len(s.cols) > 0 {
-		query.ExpressionAttributeNames = s.cols
-	}
 
-	if len(s.vals) > 0 {
-		query.Key = s.vals
+	if len(s.keys) > 0 {
+		query.Key = s.keys
 	}
 
 	if s.table != "" {
 		query.TableName = aws.String(s.table)
+	}
+
+	if s.consistent != nil {
+		query.ConsistentRead = s.consistent
 	}
 
 	return query, nil

@@ -49,7 +49,7 @@ func TestBuilder_WhereKey(t *testing.T) {
 		b.WhereKey(`DAT.'super'.'nested'.'field' = ? AND blah = ?`, 1, "yo")
 
 		require.Empty(t, b.err)
-		assert.Equal(t, "DAT.#1.#2.#3 = :0", b.keyExpression)
+		assert.Equal(t, "DAT.#1.#2.#3 = :0 AND blah = :1", b.keyExpression)
 		require.Len(t, b.cols, 3)
 
 		require.NotEmpty(t, b.cols["#1"])
@@ -64,7 +64,7 @@ func TestBuilder_WhereKey(t *testing.T) {
 		require.NotEmpty(t, b.vals[":0"])
 		require.NotEmpty(t, b.vals[":1"])
 		require.Equal(t, "1", *b.vals[":0"].N)
-		require.Equal(t, "test", *b.vals[":2"].S)
+		require.Equal(t, "yo", *b.vals[":1"].S)
 	})
 
 	t.Run("with errors", func(t *testing.T) {
