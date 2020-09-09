@@ -54,14 +54,14 @@ func (s *Builder) Key(keyName string, value interface{}, additionalKVs ...interf
 
 	s.keys[keyName] = firstVal
 	if len(additionalKVs) > 0 && (len(additionalKVs)%2) != 0 {
-		s.err = BadKeyParamsErr
+		s.err = ErrBadKeyParams
 		return s
 	}
 
 	for i := 0; i < len(additionalKVs); i += 2 {
 		k, ok := additionalKVs[i].(string)
 		if !ok {
-			s.err = BadKeyTypeErr
+			s.err = ErrBadKeyType
 			return s
 		}
 
@@ -144,7 +144,7 @@ func (s *Builder) GetItem(ctx context.Context) (*dynamodb.GetItemOutput, error) 
 		return nil, s.err
 	}
 	if s.client == nil {
-		return nil, ClientNotSetErr
+		return nil, ErrClientNotSet
 	}
 
 	input, _ := s.ToGet()
@@ -161,7 +161,7 @@ func (s *Builder) DeleteItem(ctx context.Context) (*dynamodb.DeleteItemOutput, e
 	}
 
 	if s.client == nil {
-		return nil, ClientNotSetErr
+		return nil, ErrClientNotSet
 	}
 
 	return s.client.DeleteItemWithContext(ctx, &input)
@@ -174,7 +174,7 @@ func (s *Builder) QueryIterate(ctx context.Context, fn func(output *dynamodb.Que
 		return s.err
 	}
 	if s.client == nil {
-		return ClientNotSetErr
+		return ErrClientNotSet
 	}
 	query, _ := s.ToQuery()
 
@@ -187,7 +187,7 @@ func (s *Builder) QueryAll(ctx context.Context) ([]map[string]*dynamodb.Attribut
 		return nil, s.err
 	}
 	if s.client == nil {
-		return nil, ClientNotSetErr
+		return nil, ErrClientNotSet
 	}
 	query, _ := s.ToQuery()
 
@@ -207,7 +207,7 @@ func (s *Builder) QuerySingle(ctx context.Context) (map[string]*dynamodb.Attribu
 		return nil, s.err
 	}
 	if s.client == nil {
-		return nil, ClientNotSetErr
+		return nil, ErrClientNotSet
 	}
 	query, _ := s.ToQuery()
 	query.Limit = aws.Int64(1)
@@ -231,7 +231,7 @@ func (s *Builder) ScanIterate(ctx context.Context, fn func(output *dynamodb.Scan
 		return s.err
 	}
 	if s.client == nil {
-		return ClientNotSetErr
+		return ErrClientNotSet
 	}
 
 	query, _ := s.ToScan()
@@ -246,7 +246,7 @@ func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(
 		return s.err
 	}
 	if s.client == nil {
-		return ClientNotSetErr
+		return ErrClientNotSet
 	}
 
 	query, _ := s.ToScan()
@@ -261,7 +261,7 @@ func (s *Builder) QueryDelete(ctx context.Context, keyFn KeyExtractor) error {
 		return s.err
 	}
 	if s.client == nil {
-		return ClientNotSetErr
+		return ErrClientNotSet
 	}
 
 	query, _ := s.ToQuery()
@@ -276,7 +276,7 @@ func (s *Builder) ScanDelete(ctx context.Context, keyFn KeyExtractor) error {
 		return s.err
 	}
 	if s.client == nil {
-		return ClientNotSetErr
+		return ErrClientNotSet
 	}
 
 	query, _ := s.ToScan()
@@ -291,7 +291,7 @@ func (s *Builder) ToDelete() (dynamodb.DeleteItemInput, error) {
 	}
 
 	if len(s.keys) == 0 {
-		return dynamodb.DeleteItemInput{}, KeyRequiredErr
+		return dynamodb.DeleteItemInput{}, ErrKeyRequired
 	}
 
 	var request dynamodb.DeleteItemInput
@@ -482,7 +482,7 @@ func (s *Builder) scan(query string, inputs ...interface{}) (updatedQuery string
 		case '?':
 			s.valColsIdx++
 			if len(inputs) <= (s.valColsIdx - start - 1) {
-				return "", QueryMisMatchErr
+				return "", ErrQueryMisMatch
 			}
 			var c strings.Builder
 			num := strconv.Itoa(s.valColsIdx)
@@ -530,5 +530,5 @@ func typeToAttributeVal(raw interface{}) (*dynamodb.AttributeValue, error) {
 		return v, nil
 	}
 
-	return nil, UnsupportedTypeErr
+	return nil, ErrUnsupportedType
 }
