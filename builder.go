@@ -8,7 +8,6 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/pkg/errors"
 )
 
 // Builder allows you to build dynamo queries in a more convenient fashion
@@ -55,14 +54,14 @@ func (s *Builder) Key(keyName string, value interface{}, additionalKVs ...interf
 
 	s.keys[keyName] = firstVal
 	if len(additionalKVs) > 0 && (len(additionalKVs)%2) != 0 {
-		s.err = errors.New("expected an even amount of additionalKVs parameters")
+		s.err = BadKeyParamsErr
 		return s
 	}
 
 	for i := 0; i < len(additionalKVs); i += 2 {
 		k, ok := additionalKVs[i].(string)
 		if !ok {
-			s.err = errors.New("strings are the only type of keys supported")
+			s.err = BadKeyTypeErr
 			return s
 		}
 
@@ -145,7 +144,7 @@ func (s *Builder) GetItem(ctx context.Context) (*dynamodb.GetItemOutput, error) 
 		return nil, s.err
 	}
 	if s.client == nil {
-		return nil, errors.New("client must be set")
+		return nil, ClientNotSetErr
 	}
 
 	input, _ := s.ToGet()
@@ -162,7 +161,7 @@ func (s *Builder) DeleteItem(ctx context.Context) (*dynamodb.DeleteItemOutput, e
 	}
 
 	if s.client == nil {
-		return nil, errors.New("client must be set")
+		return nil, ClientNotSetErr
 	}
 
 	return s.client.DeleteItemWithContext(ctx, &input)
@@ -175,11 +174,54 @@ func (s *Builder) QueryIterate(ctx context.Context, fn func(output *dynamodb.Que
 		return s.err
 	}
 	if s.client == nil {
-		return errors.New("client not set")
+		return ClientNotSetErr
 	}
 	query, _ := s.ToQuery()
 
 	return s.client.QueryIterator(ctx, &query, fn)
+}
+
+// QueryAll returns an all results matching the built query
+func (s *Builder) QueryAll(ctx context.Context) ([]map[string]*dynamodb.AttributeValue, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.client == nil {
+		return nil, ClientNotSetErr
+	}
+	query, _ := s.ToQuery()
+
+	var results []map[string]*dynamodb.AttributeValue
+	err := s.client.QueryIterator(ctx, &query, func(output *dynamodb.QueryOutput) error {
+		results = append(results, output.Items...)
+
+		return nil
+	})
+
+	return results, err
+}
+
+// QuerySingle returns a single result matching the built query
+func (s *Builder) QuerySingle(ctx context.Context) (map[string]*dynamodb.AttributeValue, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.client == nil {
+		return nil, ClientNotSetErr
+	}
+	query, _ := s.ToQuery()
+	query.Limit = aws.Int64(1)
+
+	var result map[string]*dynamodb.AttributeValue = nil
+	err := s.client.QueryIterator(ctx, &query, func(output *dynamodb.QueryOutput) error {
+		if len(output.Items) == 1 {
+			result = output.Items[0]
+		}
+
+		return nil
+	})
+
+	return result, err
 }
 
 // ScanIterate allows you to query dynamo based on the built object.
@@ -189,7 +231,7 @@ func (s *Builder) ScanIterate(ctx context.Context, fn func(output *dynamodb.Scan
 		return s.err
 	}
 	if s.client == nil {
-		return errors.New("client not set")
+		return ClientNotSetErr
 	}
 
 	query, _ := s.ToScan()
@@ -204,7 +246,7 @@ func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(
 		return s.err
 	}
 	if s.client == nil {
-		return errors.New("client not set")
+		return ClientNotSetErr
 	}
 
 	query, _ := s.ToScan()
@@ -219,7 +261,7 @@ func (s *Builder) QueryDelete(ctx context.Context, keyFn KeyExtractor) error {
 		return s.err
 	}
 	if s.client == nil {
-		return errors.New("client not set")
+		return ClientNotSetErr
 	}
 
 	query, _ := s.ToQuery()
@@ -234,7 +276,7 @@ func (s *Builder) ScanDelete(ctx context.Context, keyFn KeyExtractor) error {
 		return s.err
 	}
 	if s.client == nil {
-		return errors.New("client not set")
+		return ClientNotSetErr
 	}
 
 	query, _ := s.ToScan()
@@ -249,7 +291,7 @@ func (s *Builder) ToDelete() (dynamodb.DeleteItemInput, error) {
 	}
 
 	if len(s.keys) == 0 {
-		return dynamodb.DeleteItemInput{}, errors.New("key required to create a delete request")
+		return dynamodb.DeleteItemInput{}, KeyRequiredErr
 	}
 
 	var request dynamodb.DeleteItemInput
@@ -440,7 +482,7 @@ func (s *Builder) scan(query string, inputs ...interface{}) (updatedQuery string
 		case '?':
 			s.valColsIdx++
 			if len(inputs) <= (s.valColsIdx - start - 1) {
-				return "", errors.New("inputs don't match query")
+				return "", QueryMisMatchErr
 			}
 			var c strings.Builder
 			num := strconv.Itoa(s.valColsIdx)
@@ -471,6 +513,8 @@ func typeToAttributeVal(raw interface{}) (*dynamodb.AttributeValue, error) {
 		return &dynamodb.AttributeValue{SS: aws.StringSlice(v)}, nil
 	case int:
 		return &dynamodb.AttributeValue{N: aws.String(strconv.Itoa(v))}, nil
+	case int64:
+		return typeToAttributeVal(int(v))
 	case float64:
 		return &dynamodb.AttributeValue{N: aws.String(
 			strconv.FormatFloat(v, 'f', -1, 64))}, nil
@@ -486,5 +530,5 @@ func typeToAttributeVal(raw interface{}) (*dynamodb.AttributeValue, error) {
 		return v, nil
 	}
 
-	return nil, errors.New("unsupported type")
+	return nil, UnsupportedTypeErr
 }
