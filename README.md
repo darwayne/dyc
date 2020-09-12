@@ -28,7 +28,6 @@ cli := dyc.NewClient(db)
 ```
 
 #### Query
-
 ***Iterator***
 ```go
 // error ignored for demonstration purposes only
@@ -130,3 +129,9 @@ err := cli.Builder().Table("MyTable").
  - deletes all records matching the scan
  - PK and SK are the partition key and sort key needed to delete the matching records
 
+
+#### Copy table example
+```go
+totalWorkers := 40
+err := cli.CopyTable(ctx, "destinationTable", "sourceTable", totalWorkers, nil) 
+```

@@ -82,7 +82,7 @@ func (c *Client) CopyTable(parentCtx context.Context, dst string, src string, wo
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
-	errChan := make(chan error, 1)
+	errChan := make(chan error, workers)
 	readComplete := make(chan struct{})
 	dataChan := make(chan map[string]*dynamodb.AttributeValue, workers)
 	var wg sync.WaitGroup
@@ -116,7 +116,12 @@ func (c *Client) CopyTable(parentCtx context.Context, dst string, src string, wo
 				})
 
 				if err != nil {
-					errChan <- err
+					select {
+					case <-ctx.Done():
+						atomic.AddInt64(&working, -1)
+						return
+					case errChan <- err:
+					}
 				}
 				atomic.AddInt64(&working, -1)
 			}
@@ -145,7 +150,10 @@ func (c *Client) CopyTable(parentCtx context.Context, dst string, src string, wo
 		close(dataChan)
 		close(readComplete)
 		if err != nil {
-			errChan <- err
+			select {
+			case <-ctx.Done():
+			case errChan <- err:
+			}
 		}
 	}()
 
@@ -164,10 +172,9 @@ func (c *Client) CopyTable(parentCtx context.Context, dst string, src string, wo
 				cancel()
 				<-complete
 				return err
-			} else {
-				onError(err, cancel)
 			}
 
+			onError(err, cancel)
 		case <-complete:
 			return nil
 		}
