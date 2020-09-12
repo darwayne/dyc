@@ -5,7 +5,7 @@
 
 <p align="center"><img src="https://user-images.githubusercontent.com/2807589/92316080-1184e180-efbd-11ea-96a4-df774348ad67.png" width="300"></p>
 
-`dyc` is a golang dynamodb client and query builder package. It utilizes the go AWS SDK to provide a more convenient way to interact with dynamodb.
+`dyc` is a golang package which provides a dynamodb client and query builder. It utilizes the go AWS SDK to provide a more convenient way to interact with dynamodb.
 
 ### Features
  - Utilize current dynamodb query language
