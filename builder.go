@@ -241,7 +241,7 @@ func (s *Builder) ScanIterate(ctx context.Context, fn func(output *dynamodb.Scan
 
 // ParallelScanIterate allows you to do a parallel scan in dynamo based on the built object.
 // the fn parameter will be called as often as needed to retrieve all results
-func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(output *dynamodb.ScanOutput) error) error {
+func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(output *dynamodb.ScanOutput) error, unsafe bool) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -251,7 +251,7 @@ func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(
 
 	query, _ := s.ToScan()
 
-	return s.client.ParallelScanIterator(ctx, &query, workers, fn)
+	return s.client.ParallelScanIterator(ctx, &query, workers, fn, unsafe)
 }
 
 // QueryDelete deletes all records matching the query.
@@ -419,6 +419,34 @@ func (s *Builder) ToGet() (dynamodb.GetItemInput, error) {
 	}
 
 	return query, nil
+}
+
+// ToQueryIterator creates an iterator based on the currently built query
+func (s *Builder) ToQueryIterator(ctx context.Context) (*Iterator, error) {
+	if s.client == nil {
+		return nil, ErrClientNotSet
+	}
+
+	query, err := s.ToQuery()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewIteratorFromQuery(ctx, s.client, &query), nil
+}
+
+// ToScanIterator creates an iterator based on the currently built query
+func (s *Builder) ToScanIterator(ctx context.Context) (*Iterator, error) {
+	if s.client == nil {
+		return nil, ErrClientNotSet
+	}
+
+	query, err := s.ToScan()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewIteratorFromScan(ctx, s.client, &query), nil
 }
 
 // Table sets the table name

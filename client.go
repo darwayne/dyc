@@ -3,6 +3,8 @@ package dyc
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
@@ -46,7 +48,6 @@ func (c *Client) BatchWriter(ctx context.Context, tableName string, requests ...
 				}
 			}
 		}
-
 	}
 
 	return totalWritten, nil
@@ -76,8 +77,105 @@ func (c *Client) QueryIterator(ctx context.Context, input *dynamodb.QueryInput, 
 	return nil
 }
 
+// CopyTable copies all data in source to the existing destination table using
+func (c *Client) CopyTable(parentCtx context.Context, dst string, src string, workers int, onError func(err error, cancelFunc context.CancelFunc)) error {
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+
+	errChan := make(chan error, 1)
+	readComplete := make(chan struct{})
+	dataChan := make(chan map[string]*dynamodb.AttributeValue, workers)
+	var wg sync.WaitGroup
+	wg.Add(1 + workers)
+	var working int64
+
+	worker := func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-time.After(10 * time.Second):
+				select {
+				case <-readComplete:
+					if atomic.LoadInt64(&working) == 0 && len(dataChan) == 0 {
+						return
+					}
+				default:
+					continue
+				}
+			case <-ctx.Done():
+				return
+			case data, open := <-dataChan:
+				if !open {
+					return
+				}
+
+				atomic.AddInt64(&working, 1)
+				_, err := c.PutItemWithContext(ctx, &dynamodb.PutItemInput{
+					Item:      data,
+					TableName: &dst,
+				})
+
+				if err != nil {
+					errChan <- err
+				}
+				atomic.AddInt64(&working, -1)
+			}
+		}
+	}
+	for i := 0; i < workers; i++ {
+		go worker()
+	}
+
+	go func() {
+		defer wg.Done()
+		err := c.ParallelScanIterator(ctx, &dynamodb.ScanInput{
+			TableName: aws.String(src),
+		}, workers, func(output *dynamodb.ScanOutput) error {
+			for _, item := range output.Items {
+				select {
+				case dataChan <- item:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		}, true)
+
+		close(dataChan)
+		close(readComplete)
+		if err != nil {
+			errChan <- err
+		}
+	}()
+
+	complete := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(complete)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-errChan:
+			if onError == nil {
+				cancel()
+				<-complete
+				return err
+			} else {
+				onError(err, cancel)
+			}
+
+		case <-complete:
+			return nil
+		}
+	}
+}
+
 // ParallelScanIterator is a thread safe method that performs a parallel scan on dynamodb utilizing the configured amount of workers
-func (c *Client) ParallelScanIterator(ctx context.Context, input *dynamodb.ScanInput, workers int, fn func(output *dynamodb.ScanOutput) error) error {
+func (c *Client) ParallelScanIterator(ctx context.Context, input *dynamodb.ScanInput, workers int, fn func(output *dynamodb.ScanOutput) error, noLock bool) error {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	errChan := make(chan error, 1)
@@ -92,9 +190,14 @@ func (c *Client) ParallelScanIterator(ctx context.Context, input *dynamodb.ScanI
 		arg := *input
 		arg.Segment = aws.Int64(int64(idx))
 		err := c.ScanIterator(ctx, &arg, func(out *dynamodb.ScanOutput) error {
-			mu.Lock()
-			e := fn(out)
-			mu.Unlock()
+			var e error
+			if noLock {
+				e = fn(out)
+			} else {
+				mu.Lock()
+				e = fn(out)
+				mu.Unlock()
+			}
 
 			select {
 			case <-workerCtx.Done():
@@ -140,7 +243,6 @@ func (c *Client) ParallelScanIterator(ctx context.Context, input *dynamodb.ScanI
 	case err := <-errChan:
 		return err
 	case <-workerCtx.Done():
-
 	}
 
 	return nil

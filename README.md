@@ -13,11 +13,7 @@
  - Build queries with ease
  - Input substitution via `?`
  - Parallel Scan support
-
-
-### Upcoming Features
  - Copy table support
- - Iterator based api for queries and scan
 
 ### Examples
 
@@ -33,6 +29,23 @@ cli := dyc.NewClient(db)
 
 #### Query
 
+***Iterator***
+```go
+// error ignored for demonstration purposes only
+it, err := li.Builder().Table("MyTable").
+             WhereKey(`PK = ?`, "PartitionKey").
+             Index("SomeIndex").
+             // Where is equivalent to filter expression
+             Where(`'Some'.'Nested'.'Field' = ? AND 'another' = ?`, "cool", true).
+             ToQueryIterator(ctx)
+
+var results []map[string]dynamodb.AttributeValue
+for it.Next() {
+  // error ignored for demonstration purposes only
+  output, _ := it.QueryValue(), it.Err()
+  results = append(results, output.Items...)
+}
+```
 ***Iterate***
 ```go
 err := cli.Builder().Table("MyTable").
@@ -79,6 +92,24 @@ err := cli.Builder().Table("MyTable").
 
 
 #### Scan
+***Iterator***
+```go
+// error ignored for demonstration purposes only
+it, err := li.Builder().Table("MyTable").
+             WhereKey(`PK = ?`, "PartitionKey").
+             Index("SomeIndex").
+             // Where is equivalent to filter expression
+             Where(`'Some'.'Nested'.'Field' = ? AND 'another' = ?`, "cool", true).
+             ToScanIterator(ctx)
+
+var results []map[string]dynamodb.AttributeValue
+for it.Next() {
+  // error ignored for demonstration purposes only
+  output, _ := it.ScanValue(), it.Err()
+  results = append(results, output.Items...)
+}
+```
+
 ***Iterate***
 ```go
 err := cli.Builder().Table("MyTable").
