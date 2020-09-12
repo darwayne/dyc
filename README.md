@@ -12,6 +12,7 @@
  - Easily reference columns that conflict with dynamodb reserved words by wrapping column in a single quote
  - Build queries with ease
  - Input substitution via `?`
+ - Parallel Scan support
 
 
 ### Upcoming Features
