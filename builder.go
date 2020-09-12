@@ -181,7 +181,7 @@ func (s *Builder) QueryIterate(ctx context.Context, fn func(output *dynamodb.Que
 	return s.client.QueryIterator(ctx, &query, fn)
 }
 
-// QueryAll returns an all results matching the built query
+// QueryAll returns all results matching the built query
 func (s *Builder) QueryAll(ctx context.Context) ([]map[string]*dynamodb.AttributeValue, error) {
 	if s.err != nil {
 		return nil, s.err
