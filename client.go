@@ -77,6 +77,50 @@ func (c *Client) QueryIterator(ctx context.Context, input *dynamodb.QueryInput, 
 	return nil
 }
 
+func (c *Client) onCopyData(ctx context.Context, dst string, working *int64, errChan chan error, data map[string]*dynamodb.AttributeValue) {
+	atomic.AddInt64(working, 1)
+	defer func() {
+		atomic.AddInt64(working, -1)
+	}()
+	_, err := c.PutItemWithContext(ctx, &dynamodb.PutItemInput{
+		Item:      data,
+		TableName: &dst,
+	})
+
+	if err != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case errChan <- err:
+		}
+	}
+
+}
+func (c *Client) copyTableWorker(ctx context.Context, dst string, readComplete chan struct{}, dataChan chan map[string]*dynamodb.AttributeValue, working *int64, wg *sync.WaitGroup, errChan chan error) {
+	defer wg.Done()
+	for {
+		select {
+		case <-time.After(10 * time.Second):
+			select {
+			case <-readComplete:
+				if atomic.LoadInt64(working) == 0 && len(dataChan) == 0 {
+					return
+				}
+			default:
+				continue
+			}
+		case <-ctx.Done():
+			return
+		case data, open := <-dataChan:
+			if !open {
+				return
+			}
+
+			c.onCopyData(ctx, dst, working, errChan, data)
+		}
+	}
+}
+
 // CopyTable copies all data in source to the existing destination table using
 func (c *Client) CopyTable(parentCtx context.Context, dst string, src string, workers int, onError func(err error, cancelFunc context.CancelFunc)) error {
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -89,46 +133,8 @@ func (c *Client) CopyTable(parentCtx context.Context, dst string, src string, wo
 	wg.Add(1 + workers)
 	var working int64
 
-	worker := func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-time.After(10 * time.Second):
-				select {
-				case <-readComplete:
-					if atomic.LoadInt64(&working) == 0 && len(dataChan) == 0 {
-						return
-					}
-				default:
-					continue
-				}
-			case <-ctx.Done():
-				return
-			case data, open := <-dataChan:
-				if !open {
-					return
-				}
-
-				atomic.AddInt64(&working, 1)
-				_, err := c.PutItemWithContext(ctx, &dynamodb.PutItemInput{
-					Item:      data,
-					TableName: &dst,
-				})
-
-				if err != nil {
-					select {
-					case <-ctx.Done():
-						atomic.AddInt64(&working, -1)
-						return
-					case errChan <- err:
-					}
-				}
-				atomic.AddInt64(&working, -1)
-			}
-		}
-	}
 	for i := 0; i < workers; i++ {
-		go worker()
+		go c.copyTableWorker(ctx, dst, readComplete, dataChan, &working, &wg, errChan)
 	}
 
 	go func() {
@@ -181,6 +187,50 @@ func (c *Client) CopyTable(parentCtx context.Context, dst string, src string, wo
 	}
 }
 
+func (c *Client) parallelScanWorker(ctx context.Context, idx int, arg dynamodb.ScanInput, wg *sync.WaitGroup, errChan chan error, mu *sync.Mutex, noLock bool, fn func(output *dynamodb.ScanOutput) error) {
+	defer wg.Done()
+	arg.Segment = aws.Int64(int64(idx))
+	err := c.ScanIterator(ctx, &arg, func(out *dynamodb.ScanOutput) error {
+		var e error
+		if noLock {
+			e = fn(out)
+		} else {
+			mu.Lock()
+			e = fn(out)
+			mu.Unlock()
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+
+		}
+
+		if e != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case errChan <- e:
+			default:
+				return errors.New("exit early")
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case errChan <- err:
+		default:
+			return
+		}
+	}
+}
+
 // ParallelScanIterator is a thread safe method that performs a parallel scan on dynamodb utilizing the configured amount of workers
 func (c *Client) ParallelScanIterator(ctx context.Context, input *dynamodb.ScanInput, workers int, fn func(output *dynamodb.ScanOutput) error, noLock bool) error {
 	var mu sync.Mutex
@@ -192,53 +242,8 @@ func (c *Client) ParallelScanIterator(ctx context.Context, input *dynamodb.ScanI
 
 	input.TotalSegments = aws.Int64(int64(workers))
 
-	worker := func(idx int) {
-		defer wg.Done()
-		arg := *input
-		arg.Segment = aws.Int64(int64(idx))
-		err := c.ScanIterator(ctx, &arg, func(out *dynamodb.ScanOutput) error {
-			var e error
-			if noLock {
-				e = fn(out)
-			} else {
-				mu.Lock()
-				e = fn(out)
-				mu.Unlock()
-			}
-
-			select {
-			case <-workerCtx.Done():
-				return workerCtx.Err()
-			default:
-
-			}
-
-			if e != nil {
-				select {
-				case <-workerCtx.Done():
-					return workerCtx.Err()
-				case errChan <- e:
-				default:
-					return errors.New("exit early")
-				}
-			}
-
-			return nil
-		})
-
-		if err != nil {
-			select {
-			case <-workerCtx.Done():
-				return
-			case errChan <- err:
-			default:
-				return
-			}
-		}
-	}
-
 	for i := 0; i < workers; i++ {
-		go worker(i)
+		go c.parallelScanWorker(workerCtx, i, *input, &wg, errChan, &mu, noLock, fn)
 	}
 
 	go func() {

@@ -83,5 +83,9 @@ vet:
 staticcheck: ## runs staticcheck on our packages
 	staticcheck $(project_module)/...
 
+# GO111MODULE="off" go get github.com/fzipp/gocyclo
+cyclo:
+	@gocyclo -over 15 .
 
-verify: golint staticcheck vet fmt importorder
+# verify code is up to basic standards
+verify: cyclo golint staticcheck vet fmt importorder
