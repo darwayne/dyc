@@ -60,8 +60,34 @@ func (c *Client) Builder() *Builder {
 
 // QueryIterator iterates all results of a query
 func (c *Client) QueryIterator(ctx context.Context, input *dynamodb.QueryInput, fn func(output *dynamodb.QueryOutput) error) error {
+	//TODO: clean this up
+	in2 := *input
+	hasLimit := input.Limit != nil
+	var limit int
+	if hasLimit {
+		limit = int(*input.Limit)
+		in2.Limit = nil
+	}
+	seen := 0
 	var pageError error
-	err := c.DynamoDB.QueryPagesWithContext(ctx, input, func(output *dynamodb.QueryOutput, b bool) bool {
+	err := c.DynamoDB.QueryPagesWithContext(ctx, &in2, func(output *dynamodb.QueryOutput, b bool) bool {
+		if hasLimit {
+			var added, broke bool
+			var items []map[string]*dynamodb.AttributeValue
+			for _, i := range output.Items {
+				seen++
+				if seen > limit {
+					broke = true
+					break
+				}
+				added = true
+				items = append(items, i)
+			}
+			if seen > 0 && !added && broke {
+				return false
+			}
+			output.Items = items
+		}
 		pageError = fn(output)
 		return pageError == nil
 	})
@@ -262,8 +288,34 @@ func (c *Client) ParallelScanIterator(ctx context.Context, input *dynamodb.ScanI
 
 // ScanIterator iterates all results of a scan
 func (c *Client) ScanIterator(ctx context.Context, input *dynamodb.ScanInput, fn func(output *dynamodb.ScanOutput) error) error {
+	//TODO: clean this up
+	in2 := *input
+	hasLimit := input.Limit != nil
+	var limit int
+	if hasLimit {
+		limit = int(*input.Limit)
+		in2.Limit = nil
+	}
+	seen := 0
 	var pageError error
-	err := c.DynamoDB.ScanPagesWithContext(ctx, input, func(output *dynamodb.ScanOutput, b bool) bool {
+	err := c.DynamoDB.ScanPagesWithContext(ctx, &in2, func(output *dynamodb.ScanOutput, b bool) bool {
+		if hasLimit {
+			var added, broke bool
+			var items []map[string]*dynamodb.AttributeValue
+			for _, i := range output.Items {
+				seen++
+				if seen > limit {
+					broke = true
+					break
+				}
+				added = true
+				items = append(items, i)
+			}
+			if seen > 0 && !added && broke {
+				return false
+			}
+			output.Items = items
+		}
 		pageError = fn(output)
 		return pageError == nil
 	})
