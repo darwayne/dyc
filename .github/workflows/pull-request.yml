@@ -1,0 +1,31 @@
+name: pull-request
+
+#Triggers
+on:
+  pull_request:
+
+jobs:
+  verify-code:
+    name: Verify Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go 1.14
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.14
+        id: go
+
+      - name: Check out code
+        uses: actions/checkout@v1
+
+      - name: Install CI Deps
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin # See https://github.com/actions/setup-go/issues/14
+          GO111MODULE=off go get -u github.com/pavius/impi/cmd/impi
+          GO111MODULE=off go get honnef.co/go/tools/cmd/staticcheck
+          GO111MODULE="off" go get -u golang.org/x/lint/golint
+          GO111MODULE="off" go get github.com/fzipp/gocyclo
+      - name: Verify
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin # See https://github.com/actions/setup-go/issues/14
+          make verify
