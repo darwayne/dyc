@@ -2,6 +2,7 @@ package dyc
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"strings"
 	"text/scanner"
@@ -42,100 +43,199 @@ func NewBuilder() *Builder {
 // Key allows you to set the key for a given item
 // e.g Key("PK", "hello", "SK", "there")
 func (s *Builder) Key(keyName string, value interface{}, additionalKVs ...interface{}) *Builder {
-	if s.err != nil {
-		return s
-	}
-
-	var firstVal *dynamodb.AttributeValue
-	firstVal, s.err = typeToAttributeVal(value)
-	if s.err != nil {
-		return s
-	}
-
-	s.keys[keyName] = firstVal
-	if len(additionalKVs) > 0 && (len(additionalKVs)%2) != 0 {
-		s.err = ErrBadKeyParams
-		return s
-	}
-
-	for i := 0; i < len(additionalKVs); i += 2 {
-		k, ok := additionalKVs[i].(string)
-		if !ok {
-			s.err = ErrBadKeyType
-			return s
-		}
-
-		var val *dynamodb.AttributeValue
-		val, s.err = typeToAttributeVal(additionalKVs[i+1])
+	return s.update(func() {
+		var firstVal *dynamodb.AttributeValue
+		firstVal, s.err = typeToAttributeVal(value)
 		if s.err != nil {
-			return s
+			return
 		}
 
-		s.keys[k] = val
-	}
+		s.keys[keyName] = firstVal
+		if len(additionalKVs) > 0 && (len(additionalKVs)%2) != 0 {
+			s.err = ErrBadKeyParams
+			return
+		}
 
-	return s
+		for i := 0; i < len(additionalKVs); i += 2 {
+			k, ok := additionalKVs[i].(string)
+			if !ok {
+				s.err = ErrBadKeyType
+				return
+			}
+
+			var val *dynamodb.AttributeValue
+			val, s.err = typeToAttributeVal(additionalKVs[i+1])
+			if s.err != nil {
+				return
+			}
+
+			s.keys[k] = val
+		}
+	})
 }
 
-// Condition allows you do make a condition expression
+// Condition allows you do make a condition expression.
 // e.g Condition("'MyKey' = ?", "yourKey")
+// note: calling this multiple times combines conditions with an AND
 func (s *Builder) Condition(query string, vals ...interface{}) *Builder {
-	if s.err != nil {
-		return s
-	}
-	s.conditionExpression, s.err = s.scan(query, vals...)
-	return s
+	return s.update(func() {
+		s.addExpression(&s.conditionExpression, "AND", query, vals...)
+	})
+}
+
+// OrCondition allows you do make an OR if you have multiple conditions
+// e.g Condition("'MyKey' = ?", "yourKey")
+// note: calling this multiple times combines conditions with an OR
+func (s *Builder) OrCondition(query string, vals ...interface{}) *Builder {
+	return s.update(func() {
+		s.addExpression(&s.conditionExpression, "OR", query, vals...)
+	})
 }
 
 // WhereKey allows you do make a key expression
 // e.g WhereKey("'MyKey' = ?", "yourKey")
+// note: calling this multiple times combines conditions with an AND
 func (s *Builder) WhereKey(query string, vals ...interface{}) *Builder {
-	if s.err != nil {
-		return s
-	}
-	s.keyExpression, s.err = s.scan(query, vals...)
-	return s
+	return s.update(func() {
+		s.addExpression(&s.keyExpression, "AND", query, vals...)
+	})
 }
 
 // Where is equivalent to a filter expression
 // e.g Where("'Hey' = ? AND 'Test'.'Nested'" = ?, "yo", true)
+// note: calling this multiple times combines conditions with an AND
 func (s *Builder) Where(query string, vals ...interface{}) *Builder {
+	return s.update(func() {
+		s.addExpression(&s.filterExpresion, "AND", query, vals...)
+	})
+}
+
+// OrWhere is equivalent to a filter expression with an OR
+// e.g Where("'Hey' = ? AND 'Test'.'Nested'" = ?, "yo", true).OrWhere("'Foo' = ?", "bar")
+func (s *Builder) OrWhere(query string, vals ...interface{}) *Builder {
+	return s.update(func() {
+		s.addExpression(&s.filterExpresion, "OR", query, vals...)
+	})
+}
+
+func (s *Builder) addExpression(expression *string, separator, query string, vals ...interface{}) {
+	var result string
+	result, s.err = s.scan(query, vals...)
+	result = "(" + result + ")"
+	if *expression == "" {
+		*expression = result
+	} else {
+		*expression += " " + separator + " " + result
+	}
+}
+
+// IN lets you build an IN filter expression
+// e.g IN(`COL_NAME_HERE`, 1,2,3,4,5)
+// note: if you have an existing filter expression this will be prefixed with an AND
+func (s *Builder) IN(column string, vals ...interface{}) *Builder {
+	return s.update(func() {
+		s.Where(s.toInQuery(column, vals...), vals...)
+	})
+}
+
+// INSlice lets you build an IN filter expression from a slice
+// e.g INSlice(`COL_NAME_HERE`, []int{1,2,3,4,5})
+// note: if you have an existing filter expression this will be prefixed with an AND
+func (s *Builder) INSlice(column string, val interface{}) *Builder {
+	return s.update(func() {
+		result := s.sliceToValues(val)
+		if result == nil {
+			s.err = ErrNotSlice
+			return
+		}
+		s.IN(column, result...)
+	})
+}
+
+// OrIN lets you build an IN filter expression
+// e.g IN(`COL_NAME_HERE`, 1,2,3,4,5)
+// note: if you have an existing filter expression this will be prefixed with an OR
+func (s *Builder) OrIN(column string, vals ...interface{}) *Builder {
+	return s.update(func() {
+		s.OrWhere(s.toInQuery(column, vals...), vals...)
+	})
+}
+
+// OrINSlice lets you build an IN filter expression from a slice
+// e.g INSlice(`COL_NAME_HERE`, []int{1,2,3,4,5})
+// note: if you have an existing filter expression this will be prefixed with an OR
+func (s *Builder) OrINSlice(column string, val interface{}) *Builder {
+	return s.update(func() {
+		result := s.sliceToValues(val)
+		if result == nil {
+			s.err = ErrNotSlice
+			return
+		}
+		s.OrIN(column, result...)
+	})
+}
+
+func (s *Builder) sliceToValues(slice interface{}) []interface{} {
+	arr := reflect.ValueOf(slice)
+	if arr.Kind() != reflect.Slice {
+		return nil
+	}
+
+	length := arr.Len()
+	result := make([]interface{}, length)
+	for i := 0; i < length; i++ {
+		result[i] = arr.Index(i).Interface()
+	}
+
+	return result
+}
+
+func (s *Builder) toInQuery(column string, vals ...interface{}) string {
+	var builder strings.Builder
+	builder.WriteString(column)
+	builder.WriteString(" IN(")
+	lastIdx := len(vals) - 1
+	for idx := range vals {
+		builder.WriteString("?")
+		if idx != lastIdx {
+			builder.WriteString(",")
+		}
+	}
+
+	builder.WriteString(")")
+
+	return builder.String()
+}
+
+func (s *Builder) update(fn func()) *Builder {
 	if s.err != nil {
 		return s
 	}
-	s.filterExpresion, s.err = s.scan(query, vals...)
+
+	fn()
+
 	return s
 }
 
 // Client sets client that will be used for client operations based on built object
 func (s *Builder) Client(client *Client) *Builder {
-	if s.err != nil {
-		return s
-	}
-	s.client = client
-	return s
+	return s.update(func() {
+		s.client = client
+	})
 }
 
 // Sort sets sort as either ascending or descending
 func (s *Builder) Sort(ascending bool) *Builder {
-	if s.err != nil {
-		return s
-	}
-
-	s.ascending = aws.Bool(ascending)
-
-	return s
+	return s.update(func() {
+		s.ascending = aws.Bool(ascending)
+	})
 }
 
 // ConsistentRead sets the consistent read flag
 func (s *Builder) ConsistentRead(consistent bool) *Builder {
-	if s.err != nil {
-		return s
-	}
-
-	s.consistent = aws.Bool(consistent)
-
-	return s
+	return s.update(func() {
+		s.consistent = aws.Bool(consistent)
+	})
 }
 
 // GetItem builds and runs a query using info in key and table
@@ -176,7 +276,10 @@ func (s *Builder) QueryIterate(ctx context.Context, fn func(output *dynamodb.Que
 	if s.client == nil {
 		return ErrClientNotSet
 	}
-	query, _ := s.ToQuery()
+	query, err := s.ToQuery()
+	if err != nil {
+		return err
+	}
 
 	return s.client.QueryIterator(ctx, &query, fn)
 }
@@ -419,34 +522,6 @@ func (s *Builder) ToGet() (dynamodb.GetItemInput, error) {
 	}
 
 	return query, nil
-}
-
-// ToQueryIterator creates an iterator based on the currently built query
-func (s *Builder) ToQueryIterator(ctx context.Context) (*Iterator, error) {
-	if s.client == nil {
-		return nil, ErrClientNotSet
-	}
-
-	query, err := s.ToQuery()
-	if err != nil {
-		return nil, err
-	}
-
-	return NewIteratorFromQuery(ctx, s.client, &query), nil
-}
-
-// ToScanIterator creates an iterator based on the currently built query
-func (s *Builder) ToScanIterator(ctx context.Context) (*Iterator, error) {
-	if s.client == nil {
-		return nil, ErrClientNotSet
-	}
-
-	query, err := s.ToScan()
-	if err != nil {
-		return nil, err
-	}
-
-	return NewIteratorFromScan(ctx, s.client, &query), nil
 }
 
 // Table sets the table name

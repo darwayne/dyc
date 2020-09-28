@@ -15,4 +15,6 @@ var (
 	ErrUnsupportedType = errors.New("unsupported type")
 	// ErrQueryMisMatch occurs if the number of ? don't line up with the given inputs for a query
 	ErrQueryMisMatch = errors.New("inputs don't match query")
+	// ErrNotSlice occurs if a non slice type is provided as a value for any of the IN builder query functions
+	ErrNotSlice = errors.New("provided value is not a slice")
 )
