@@ -88,4 +88,7 @@ cyclo:
 	@gocyclo -over 15 .
 
 # verify code is up to basic standards
-verify: cyclo golint staticcheck vet fmt importorder
+verify: golint staticcheck vet fmt importorder
+
+touch-all-files:
+	find . -type f -name "*.go" -exec touch {} +

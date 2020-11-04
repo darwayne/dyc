@@ -16,7 +16,7 @@ func TestBuilder_Where(t *testing.T) {
 		b.Where(`DAT.'super'.'nested'.'field' = ?`, 1)
 
 		require.Empty(t, b.err)
-		assert.Equal(t, "DAT.#1.#2.#3 = :0", b.filterExpresion)
+		assert.Equal(t, "(DAT.#1.#2.#3 = :0)", b.filterExpresion)
 		require.Len(t, b.cols, 3)
 
 		require.NotEmpty(t, b.cols["#1"])
@@ -43,13 +43,46 @@ func TestBuilder_Where(t *testing.T) {
 	})
 }
 
+func TestBuilder_IN(t *testing.T) {
+	t.Run("happy path", func(t *testing.T) {
+		b := NewBuilder()
+		b.IN(`DAT.'super'.'nested'.'field'`, 1, 2, 3, 4, 5, 6, 7, 89)
+
+		require.Empty(t, b.err)
+		assert.Equal(t, "(DAT.#1.#2.#3 IN(:0,:1,:2,:3,:4,:5,:6,:7))", b.filterExpresion)
+		require.Len(t, b.cols, 3)
+
+		require.NotEmpty(t, b.cols["#1"])
+		require.NotEmpty(t, b.cols["#2"])
+		require.NotEmpty(t, b.cols["#3"])
+
+		require.NotPanics(t, func() {
+			assert.Equal(t, "super", *b.cols["#1"])
+			assert.Equal(t, "nested", *b.cols["#2"])
+			assert.Equal(t, "field", *b.cols["#3"])
+
+			require.NotEmpty(t, b.vals)
+			require.NotEmpty(t, b.vals[":0"])
+			require.NotEmpty(t, b.vals[":1"])
+			require.Equal(t, "1", *b.vals[":0"].N)
+			require.Equal(t, "2", *b.vals[":1"].N)
+			require.Equal(t, "3", *b.vals[":2"].N)
+			require.Equal(t, "4", *b.vals[":3"].N)
+			require.Equal(t, "5", *b.vals[":4"].N)
+			require.Equal(t, "6", *b.vals[":5"].N)
+			require.Equal(t, "7", *b.vals[":6"].N)
+			require.Equal(t, "89", *b.vals[":7"].N)
+		})
+	})
+}
+
 func TestBuilder_WhereKey(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		b := NewBuilder()
 		b.WhereKey(`DAT.'super'.'nested'.'field' = ? AND blah = ?`, 1, "yo")
 
 		require.Empty(t, b.err)
-		assert.Equal(t, "DAT.#1.#2.#3 = :0 AND blah = :1", b.keyExpression)
+		assert.Equal(t, "(DAT.#1.#2.#3 = :0 AND blah = :1)", b.keyExpression)
 		require.Len(t, b.cols, 3)
 
 		require.NotEmpty(t, b.cols["#1"])
