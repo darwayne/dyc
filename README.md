@@ -121,6 +121,41 @@ err := cli.Builder().Table("MyTable").
   })
 ```
 
+***In***
+```go
+err := cli.Builder().Table("MyTable").
+  IN(`'Some'.'Nested'.'Field'`, "value1", "value2").
+  ScanIterate(ctx, func(output *dynamodb.ScanOutput) error {
+    // get results
+    return nil
+  })
+```
+
+***InSlice***
+```go
+err := cli.Builder().Table("MyTable").
+  IN(`'Some'.'Nested'.'Field'`, []string{"value1", "value2"}).
+  ScanIterate(ctx, func(output *dynamodb.ScanOutput) error {
+    // get results
+    return nil
+  })
+```
+
+***Conjunctions Example***
+```go
+results, err := cli.Builder().
+  Table("MyTable").
+  Select(`PK`, "DAT", "SOME.NESTED.FIELD").
+  WhereKey("PK = ?", "some key").
+  Where(`'SOMEVALUE'.here = ?`, true).
+  OrWhere(`'SOMEOTHER'.'VALUE' = ?`, false).
+  OrIN("field1", 23, 432, 200, 23).
+  InSlice("field2", []string{"one", "two", "three"})
+  Condition("attribute_not_exists(YO.'id')").
+  OrCondition("attribute_exists(YOLO)").
+  IN(`'Some'.'Nested'.'Field'`, []string{"value1", "value2"}).
+  QueryAll(context.TODO())
+```
 
 ***Delete***
 ```go
