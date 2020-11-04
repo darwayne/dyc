@@ -14,6 +14,8 @@
  - Input substitution via `?`
  - Parallel Scan support
  - Copy table support
+ - In Support
+ - Basic Conjunctions support
 
 ### Examples
 

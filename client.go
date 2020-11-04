@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/pkg/errors"
 )
 
@@ -20,6 +21,33 @@ type Client struct {
 // NewClient creates a new dyc client
 func NewClient(db *dynamodb.DynamoDB) *Client {
 	return &Client{DynamoDB: db}
+}
+
+// BatchPut allows you to put a batch of items to a table
+// items will me converted to a marshal map
+func (c *Client) BatchPut(ctx context.Context, tableName string, items ...interface{}) (int, error) {
+	arr := make([]interface{}, 0, len(items))
+	for _, a := range items {
+		vals := sliceToValues(a)
+		if vals == nil {
+			arr = append(arr, a)
+		} else {
+			arr = append(arr, vals...)
+		}
+	}
+	requests := make([]*dynamodb.WriteRequest, 0, len(arr))
+	for _, a := range arr {
+		data, err := dynamodbattribute.MarshalMap(a)
+		if err != nil {
+			return 0, err
+		}
+		requests = append(requests, &dynamodb.WriteRequest{
+			PutRequest: &dynamodb.PutRequest{
+				Item: data,
+			},
+		})
+	}
+	return c.BatchWriter(ctx, tableName, requests...)
 }
 
 // BatchWriter batch writes an array of write requests to a table
@@ -329,6 +357,21 @@ func (c *Client) ScanIterator(ctx context.Context, input *dynamodb.ScanInput, fn
 	}
 
 	return nil
+}
+
+// ScanCount counts all records matching the scan query
+func (c *Client) ScanCount(ctx context.Context, input *dynamodb.ScanInput) (int64, error) {
+	i := *input
+	i.Select = aws.String(dynamodb.SelectCount)
+	var total int64
+	c.ScanIterator(ctx, &i, func(output *dynamodb.ScanOutput) error {
+		if output.Count == nil {
+			return errors.New("count nil")
+		}
+		atomic.AddInt64(&total, *output.Count)
+		return nil
+	})
+	return total, nil
 }
 
 // QueryDeleter deletes all records that match the query

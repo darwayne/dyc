@@ -2,6 +2,7 @@ package dyc
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strconv"
 	"strings"
@@ -15,11 +16,13 @@ import (
 type Builder struct {
 	colsIdx             int
 	valColsIdx          int
+	selectedFields      string
 	cols                map[string]*string
 	vals                map[string]*dynamodb.AttributeValue
 	keys                map[string]*dynamodb.AttributeValue
 	err                 error
 	filterExpresion     string
+	updateExpression    string
 	keyExpression       string
 	conditionExpression string
 	table               string
@@ -110,11 +113,28 @@ func (s *Builder) Where(query string, vals ...interface{}) *Builder {
 	})
 }
 
+// Update is equivalent to an update expression
+// e.g Update("'Hey' = ? AND 'Test'.'Nested'" = ?, "yo", true)
+// note: calling this multiple times combines conditions with an AND
+func (s *Builder) Update(query string, vals ...interface{}) *Builder {
+	return s.update(func() {
+		s.addExpression(&s.updateExpression, "AND", query, vals...)
+	})
+}
+
 // OrWhere is equivalent to a filter expression with an OR
 // e.g Where("'Hey' = ? AND 'Test'.'Nested'" = ?, "yo", true).OrWhere("'Foo' = ?", "bar")
 func (s *Builder) OrWhere(query string, vals ...interface{}) *Builder {
 	return s.update(func() {
 		s.addExpression(&s.filterExpresion, "OR", query, vals...)
+	})
+}
+
+// SelectFields allows you to select which fields to pull back from dynamo
+func (s *Builder) SelectFields(fields ...string) *Builder {
+	return s.update(func() {
+		query := strings.Join(fields, ",")
+		s.selectedFields, s.err = s.scan(query)
 	})
 }
 
@@ -143,7 +163,7 @@ func (s *Builder) IN(column string, vals ...interface{}) *Builder {
 // note: if you have an existing filter expression this will be prefixed with an AND
 func (s *Builder) INSlice(column string, val interface{}) *Builder {
 	return s.update(func() {
-		result := s.sliceToValues(val)
+		result := sliceToValues(val)
 		if result == nil {
 			s.err = ErrNotSlice
 			return
@@ -166,28 +186,13 @@ func (s *Builder) OrIN(column string, vals ...interface{}) *Builder {
 // note: if you have an existing filter expression this will be prefixed with an OR
 func (s *Builder) OrINSlice(column string, val interface{}) *Builder {
 	return s.update(func() {
-		result := s.sliceToValues(val)
+		result := sliceToValues(val)
 		if result == nil {
 			s.err = ErrNotSlice
 			return
 		}
 		s.OrIN(column, result...)
 	})
-}
-
-func (s *Builder) sliceToValues(slice interface{}) []interface{} {
-	arr := reflect.ValueOf(slice)
-	if arr.Kind() != reflect.Slice {
-		return nil
-	}
-
-	length := arr.Len()
-	result := make([]interface{}, length)
-	for i := 0; i < length; i++ {
-		result[i] = arr.Index(i).Interface()
-	}
-
-	return result
 }
 
 func (s *Builder) toInQuery(column string, vals ...interface{}) string {
@@ -253,6 +258,21 @@ func (s *Builder) GetItem(ctx context.Context) (*dynamodb.GetItemOutput, error) 
 	return output, err
 }
 
+// UpdateItem builds and runs an update query
+func (s *Builder) UpdateItem(ctx context.Context) (*dynamodb.UpdateItemOutput, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.client == nil {
+		return nil, ErrClientNotSet
+	}
+
+	input, _ := s.ToUpdate()
+	output, err := s.client.UpdateItemWithContext(ctx, &input)
+
+	return output, err
+}
+
 // DeleteItem deletes a single item utilizing data set via Table, Keys and Condition method calls
 func (s *Builder) DeleteItem(ctx context.Context) (*dynamodb.DeleteItemOutput, error) {
 	input, err := s.ToDelete()
@@ -284,7 +304,7 @@ func (s *Builder) QueryIterate(ctx context.Context, fn func(output *dynamodb.Que
 	return s.client.QueryIterator(ctx, &query, fn)
 }
 
-// QueryAll returns all results matching the built query
+// QueryAll returns an all results matching the built query
 func (s *Builder) QueryAll(ctx context.Context) ([]map[string]*dynamodb.AttributeValue, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -293,7 +313,6 @@ func (s *Builder) QueryAll(ctx context.Context) ([]map[string]*dynamodb.Attribut
 		return nil, ErrClientNotSet
 	}
 	query, _ := s.ToQuery()
-
 	var results []map[string]*dynamodb.AttributeValue
 	err := s.client.QueryIterator(ctx, &query, func(output *dynamodb.QueryOutput) error {
 		results = append(results, output.Items...)
@@ -315,14 +334,20 @@ func (s *Builder) QuerySingle(ctx context.Context) (map[string]*dynamodb.Attribu
 	query, _ := s.ToQuery()
 	query.Limit = aws.Int64(1)
 
+	earlyExit := errors.New("early exit")
 	var result map[string]*dynamodb.AttributeValue = nil
 	err := s.client.QueryIterator(ctx, &query, func(output *dynamodb.QueryOutput) error {
-		if len(output.Items) == 1 {
+		if len(output.Items) > 0 {
 			result = output.Items[0]
+			return earlyExit
 		}
 
 		return nil
 	})
+
+	if err == earlyExit {
+		err = nil
+	}
 
 	return result, err
 }
@@ -432,6 +457,11 @@ func (s *Builder) ToQuery() (dynamodb.QueryInput, error) {
 		query.FilterExpression = aws.String(s.filterExpresion)
 	}
 
+	if s.selectedFields != "" {
+		query.Select = aws.String("SPECIFIC_ATTRIBUTES")
+		query.ProjectionExpression = aws.String(s.selectedFields)
+	}
+
 	if len(s.cols) > 0 {
 		query.ExpressionAttributeNames = s.cols
 	}
@@ -472,6 +502,11 @@ func (s *Builder) ToScan() (dynamodb.ScanInput, error) {
 	var query dynamodb.ScanInput
 	if s.filterExpresion != "" {
 		query.FilterExpression = aws.String(s.filterExpresion)
+	}
+
+	if s.selectedFields != "" {
+		query.Select = aws.String("SPECIFIC_ATTRIBUTES")
+		query.ProjectionExpression = aws.String(s.selectedFields)
 	}
 
 	if len(s.cols) > 0 {
@@ -519,6 +554,40 @@ func (s *Builder) ToGet() (dynamodb.GetItemInput, error) {
 
 	if s.consistent != nil {
 		query.ConsistentRead = s.consistent
+	}
+
+	return query, nil
+}
+
+// ToUpdate produces a dynamodb.UpdateItemInput value based on configured builder
+func (s *Builder) ToUpdate() (dynamodb.UpdateItemInput, error) {
+	if s.err != nil {
+		return dynamodb.UpdateItemInput{}, s.err
+	}
+
+	var query dynamodb.UpdateItemInput
+	if len(s.keys) > 0 {
+		query.Key = s.keys
+	}
+
+	if s.updateExpression != "" {
+		query.UpdateExpression = aws.String(s.updateExpression)
+	}
+
+	if s.conditionExpression != "" {
+		query.ConditionExpression = aws.String(s.conditionExpression)
+	}
+
+	if len(s.cols) > 0 {
+		query.ExpressionAttributeNames = s.cols
+	}
+
+	if len(s.vals) > 0 {
+		query.ExpressionAttributeValues = s.vals
+	}
+
+	if s.table != "" {
+		query.TableName = aws.String(s.table)
 	}
 
 	return query, nil
@@ -634,4 +703,19 @@ func typeToAttributeVal(raw interface{}) (*dynamodb.AttributeValue, error) {
 	}
 
 	return nil, ErrUnsupportedType
+}
+
+func sliceToValues(slice interface{}) []interface{} {
+	arr := reflect.ValueOf(slice)
+	if arr.Kind() != reflect.Slice {
+		return nil
+	}
+
+	length := arr.Len()
+	result := make([]interface{}, length)
+	for i := 0; i < length; i++ {
+		result[i] = arr.Index(i).Interface()
+	}
+
+	return result
 }
