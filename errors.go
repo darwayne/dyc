@@ -17,4 +17,6 @@ var (
 	ErrQueryMisMatch = errors.New("inputs don't match query")
 	// ErrNotSlice occurs if a non slice type is provided as a value for any of the IN builder query functions
 	ErrNotSlice = errors.New("provided value is not a slice")
+	// ErrNotPointer occurs if a non pointer type is provided to the Result method of the builder type
+	ErrNotPointer = errors.New("provided result type is not a slice")
 )
