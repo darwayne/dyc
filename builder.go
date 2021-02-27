@@ -301,6 +301,24 @@ func (s *Builder) parseResult(result interface{}, errs ...error) error {
 	return err
 }
 
+// PutItem inserts the provided data and marshal maps it using the aws sdk
+func (s *Builder) PutItem(ctx context.Context, data interface{}) (*dynamodb.PutItemOutput, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.client == nil {
+		return nil, ErrClientNotSet
+	}
+
+	input, err := s.ToPut(data)
+	if err != nil {
+		return nil, err
+	}
+	output, err := s.client.PutItemWithContext(ctx, &input)
+
+	return output, err
+}
+
 // UpdateItem builds and runs an update query
 func (s *Builder) UpdateItem(ctx context.Context) (*dynamodb.UpdateItemOutput, error) {
 	if s.err != nil {
@@ -634,6 +652,35 @@ func (s *Builder) ToUpdate() (dynamodb.UpdateItemInput, error) {
 	}
 
 	return query, nil
+}
+
+// ToPut produces a dynamodb.PutItemInput value based on configured builder
+func (s *Builder) ToPut(item interface{}) (dynamodb.PutItemInput, error) {
+	if s.err != nil {
+		return dynamodb.PutItemInput{}, s.err
+	}
+
+	var query dynamodb.PutItemInput
+	if s.conditionExpression != "" {
+		query.ConditionExpression = aws.String(s.conditionExpression)
+	}
+
+	if len(s.cols) > 0 {
+		query.ExpressionAttributeNames = s.cols
+	}
+
+	if len(s.vals) > 0 {
+		query.ExpressionAttributeValues = s.vals
+	}
+
+	if s.table != "" {
+		query.TableName = aws.String(s.table)
+	}
+
+	var err error
+	query.Item, err = dynamodbattribute.MarshalMap(item)
+
+	return query, err
 }
 
 // Table sets the table name
