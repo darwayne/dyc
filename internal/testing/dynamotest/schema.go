@@ -7,11 +7,13 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
+// DefaultThroughput includes some basic throughput capacity
 var DefaultThroughput = &dynamodb.ProvisionedThroughput{
 	ReadCapacityUnits:  aws.Int64(25),
 	WriteCapacityUnits: aws.Int64(25),
 }
 
+// DefaultKeySchema includes a default PK, SK based key schema
 func DefaultKeySchema() []*dynamodb.KeySchemaElement {
 	return toDynamoKeySchema(map[string]string{
 		"PK": "HASH",
@@ -19,6 +21,7 @@ func DefaultKeySchema() []*dynamodb.KeySchemaElement {
 	})
 }
 
+// DefaultDefinitions contains all the default attribute definitions
 func DefaultDefinitions() []*dynamodb.AttributeDefinition {
 	return toDynamoAttrs(map[string]string{
 		"PK":      "S",
@@ -39,6 +42,7 @@ func DefaultDefinitions() []*dynamodb.AttributeDefinition {
 	})
 }
 
+// DefaultGSIConfiguration contains some generic GSI keys
 func DefaultGSIConfiguration() []*dynamodb.GlobalSecondaryIndex {
 	return []*dynamodb.GlobalSecondaryIndex{
 		{
@@ -121,6 +125,7 @@ func DefaultGSIConfiguration() []*dynamodb.GlobalSecondaryIndex {
 	}
 }
 
+// DefaultSchema to use
 func DefaultSchema() Schema {
 	return Schema{
 		KeySchema: DefaultKeySchema(),
@@ -129,6 +134,7 @@ func DefaultSchema() Schema {
 	}
 }
 
+// Schema represents a dynamodb schema
 type Schema struct {
 	KeySchema []*dynamodb.KeySchemaElement
 	Attrs     []*dynamodb.AttributeDefinition
