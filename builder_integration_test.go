@@ -141,7 +141,7 @@ func defaultCtx() context.Context {
 func setupBuilder(t *testing.T) *Builder {
 	t.Helper()
 	t.Parallel()
-	table, db := dynamotest.SetupTestTable(t, context.Background(), "builder", dynamotest.DefaultSchema())
+	table, db := dynamotest.SetupTestTable(context.Background(), t, "builder", dynamotest.DefaultSchema())
 
 	return NewClient(db).Builder().Table(table)
 }

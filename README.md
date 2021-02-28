@@ -60,37 +60,89 @@ err := cli.Builder().Table("MyTable").
   })
 ```
 
-***All***
+***Query All***
 ```go
+type Row struct {
+	PK     string
+	SK     string
+	Some map[string]interface
+}
+
+var rows []Row
 // results will be an array of dynamodb attribute maps
 results, err := cli.Builder().Table("MyTable").
   // WhereKey is equivalent to query expression
   WhereKey(`PK = ?`, "PartitionKey").
+  // Result Unmarshals the raw results into the custom type
+  Result(&rows).
   Index("SomeIndex").
   Where(`'Some'.'Nested'.'Field' = ? AND 'another' = ?`, "cool", true).
   QueryAll(ctx context.Context)
 ```
 
-***Single***
+***Query Single***
 ```go
+type Row struct {
+	PK     string
+	SK     string
+	Some map[string]interface
+}
+
+var row Row
 //result will be a dynamodb attribute map
 result, err := cli.Builder().Table("MyTable").
   WhereKey(`PK = ?`, "PartitionKey").
+  // Result Unmarshals the raw results into the custom type
+  Result(&row).
   Index("SomeIndex").
   Where(`'Some'.'Nested'.'Field' = ? AND 'another' = ?`, "cool", true).
   QuerySingle(ctx context.Context)
 ```
 
-***Delete***
+***Delete By Query***
 ```go
+primaryKeyExtractor := dyc.FieldsExtractor("PK", "SK")
 err := cli.Builder().Table("MyTable").
   WhereKey("PK = ? AND SK BETWEEN ? AND ?", "key", 1, 1337)
   Where(`'Some'.'Nested'.'Field' = ? AND 'another' = ?`, "cool", true).
-  QueryDelete(ctx, dyc.FieldsExtractor("ID"))
+  QueryDelete(ctx, primaryKeyExtractor)
 ```
  - deletes all records matching the query
- - ID is the partition key needed to delete the matching records
+ 
+***Insert Item***
+```go
+type Row struct {
+	PK     string
+	SK     string
+	StrMap map[string]string
+}
+row := Row{PK: "yo", SK: "lo", StrMap: map[string]string{"who": "goes there"}}
+result, err := cli.Builder().Table("MyTable").
+  PutItem(context.Background(), row)
 
+```
+
+***Insert Item Conditionally***
+```go
+type Row struct {
+	PK     string
+	SK     string
+	StrMap map[string]string
+}
+row := Row{PK: "yo", SK: "lo", StrMap: map[string]string{"who": "goes there"}}
+result, err := cli.Builder().Table("MyTable").
+  Condition("attribute_not_exists(PK)").
+  PutItem(context.Background(), row)
+
+```
+
+***Update Item***
+```go
+result, err := cli.Builder().Table("MyTable").
+  Key("PK", "yo", "SK", "lo").
+  Update(`REMOVE 'StrMap'.'who' SET 'StrMap'.'goes' = ?`, "who there").
+  UpdateItem(context.Background())
+```
 
 #### Scan
 ***Iterator***
@@ -157,7 +209,7 @@ results, err := cli.Builder().
   QueryAll(context.TODO())
 ```
 
-***Delete***
+***Scan Delete***
 ```go
 err := cli.Builder().Table("MyTable").
   Where(`'Some'.'Nested'.'Field' = ? AND 'another' = ?`, "cool", true).

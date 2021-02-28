@@ -29,14 +29,16 @@ func endpoint() string {
 	return endpoint
 }
 
-func SetupTestTable(t *testing.T, parentCtx context.Context, tableName string, schema Schema) (string, *dynamodb.DynamoDB) {
+// SetupTestTable sets up a table that will have random characters
+// appended to the table name to avoid conflicts between tests with the same table name
+func SetupTestTable(parentCtx context.Context, t *testing.T, tableName string, schema Schema) (string, *dynamodb.DynamoDB) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
 	endpoint := endpoint()
 	db := setupDynamoSession(t, endpoint)
-	table := setupDynamoTable(t, ctx, db, tableName, schema)
+	table := setupDynamoTable(ctx, t, db, tableName, schema)
 
 	return table, db
 }
@@ -55,7 +57,7 @@ func setupDynamoSession(t *testing.T, endpoint string) *dynamodb.DynamoDB {
 	return dynamodb.New(sess)
 }
 
-func setupDynamoTable(t *testing.T, ctx context.Context, db dynamodbiface.DynamoDBAPI, tableName string, schema Schema) string {
+func setupDynamoTable(ctx context.Context, t *testing.T, db dynamodbiface.DynamoDBAPI, tableName string, schema Schema) string {
 	t.Helper()
 
 	hash := md5.Sum(randomBytes(t, 32))
