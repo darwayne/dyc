@@ -116,12 +116,11 @@ func (s *Builder) Where(query string, vals ...interface{}) *Builder {
 }
 
 // Update is equivalent to an update expression
-// e.g Update("'Hey' = ? AND 'Test'.'Nested'" = ?, "yo", true)
+// e.g Update("SET 'Hey' = ?, 'Test'.'Nested'" = ?, "yo", true)
 // note: calling this multiple times combines conditions with an AND
 func (s *Builder) Update(query string, vals ...interface{}) *Builder {
-	return s.update(func() {
-		s.addExpression(&s.updateExpression, "AND", query, vals...)
-	})
+	s.updateExpression, s.err = s.scan(query, vals...)
+	return s
 }
 
 // OrWhere is equivalent to a filter expression with an OR
