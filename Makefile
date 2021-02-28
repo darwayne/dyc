@@ -1,7 +1,7 @@
 SHELL=/bin/bash -o pipefail
 
 project_module=github.com/darwayne/dyc
-dynamo_test_end_point="http://localhost:8000"
+dynamo_test_end_point="http://localhost:47801"
 
 
 up:
