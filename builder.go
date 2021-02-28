@@ -45,6 +45,20 @@ func NewBuilder() *Builder {
 	}
 }
 
+// Builder returns a new builder instance.
+// If client or table was set it will also be set on new instance
+func (s *Builder) Builder() *Builder {
+	b := NewBuilder()
+	if s.client != nil {
+		b.Client(s.client)
+	}
+	if s.table != "" {
+		b.Table(s.table)
+	}
+
+	return b
+}
+
 // Key allows you to set the key for a given item
 // e.g Key("PK", "hello", "SK", "there")
 func (s *Builder) Key(keyName string, value interface{}, additionalKVs ...interface{}) *Builder {
@@ -117,7 +131,6 @@ func (s *Builder) Where(query string, vals ...interface{}) *Builder {
 
 // Update is equivalent to an update expression
 // e.g Update("SET 'Hey' = ?, 'Test'.'Nested'" = ?, "yo", true)
-// note: calling this multiple times combines conditions with an AND
 func (s *Builder) Update(query string, vals ...interface{}) *Builder {
 	s.updateExpression, s.err = s.scan(query, vals...)
 	return s
@@ -263,7 +276,7 @@ func (s *Builder) GetItem(ctx context.Context) (*dynamodb.GetItemOutput, error) 
 	input, _ := s.ToGet()
 	output, err := s.client.GetItemWithContext(ctx, &input)
 
-	return output, s.parseResult(input, err)
+	return output, s.parseResult(output.Item, err)
 }
 
 func (s *Builder) parseResult(result interface{}, errs ...error) error {
