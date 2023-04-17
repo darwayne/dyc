@@ -131,6 +131,38 @@ func (c *Client) QueryIterator(ctx context.Context, input *dynamodb.QueryInput, 
 	return nil
 }
 
+// QueryIteratorV2 iterates all results of a query respecting relevant keys
+func (c *Client) QueryIteratorV2(ctx context.Context, input *dynamodb.QueryInput, keys []string, fn func(output *dynamodb.QueryOutput) error) error {
+	modifier := limitModifier(&input.Limit)
+	var pageError error
+	err := c.DynamoDB.QueryPagesWithContext(ctx, input, func(output *dynamodb.QueryOutput, b bool) bool {
+		if len(output.Items) == 0 {
+			return true
+		}
+		trimmed, exitEarly := modifier(&output.Items)
+		if !exitEarly {
+			return false
+		}
+		totalItems := len(output.Items)
+		lastIDX := totalItems - 1
+		if totalItems > 0 && trimmed {
+			output.SetLastEvaluatedKey(extractFields(output.Items[lastIDX], keys...))
+		}
+		pageError = fn(output)
+		return pageError == nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if pageError != nil {
+		return pageError
+	}
+
+	return nil
+}
+
 func (c *Client) onCopyData(ctx context.Context, dst string, working *int64, errChan chan error, data map[string]*dynamodb.AttributeValue) {
 	atomic.AddInt64(working, 1)
 	defer func() {
@@ -359,6 +391,38 @@ func (c *Client) ScanIterator(ctx context.Context, input *dynamodb.ScanInput, fn
 	return nil
 }
 
+// ScanIteratorV2 iterates all results of a scan respecting keys
+func (c *Client) ScanIteratorV2(ctx context.Context, input *dynamodb.ScanInput, keys []string, fn func(output *dynamodb.ScanOutput) error) error {
+	modifier := limitModifier(&input.Limit)
+	var pageError error
+	err := c.DynamoDB.ScanPagesWithContext(ctx, input, func(output *dynamodb.ScanOutput, b bool) bool {
+		if len(output.Items) == 0 {
+			return true
+		}
+		trimmed, exitEarly := modifier(&output.Items)
+		if !exitEarly {
+			return false
+		}
+		totalItems := len(output.Items)
+		lastIDX := totalItems - 1
+		if totalItems > 0 && trimmed {
+			output.SetLastEvaluatedKey(extractFields(output.Items[lastIDX], keys...))
+		}
+		pageError = fn(output)
+		return pageError == nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if pageError != nil {
+		return pageError
+	}
+
+	return nil
+}
+
 // ScanCount counts all records matching the scan query
 func (c *Client) ScanCount(ctx context.Context, input *dynamodb.ScanInput) (int64, error) {
 	i := *input
@@ -375,8 +439,9 @@ func (c *Client) ScanCount(ctx context.Context, input *dynamodb.ScanInput) (int6
 }
 
 // QueryDeleter deletes all records that match the query
-func (c *Client) QueryDeleter(ctx context.Context, table string, input *dynamodb.QueryInput, keyFn KeyExtractor) error {
-	err := c.QueryIterator(ctx, input, func(out *dynamodb.QueryOutput) error {
+func (c *Client) QueryDeleter(ctx context.Context, table string, input *dynamodb.QueryInput, keys []string) error {
+	keyFn := FieldsExtractor(keys...)
+	err := c.QueryIteratorV2(ctx, input, keys, func(out *dynamodb.QueryOutput) error {
 		requests := make([]*dynamodb.WriteRequest, 0, len(out.Items))
 		for _, attrs := range out.Items {
 			requests = append(requests, &dynamodb.WriteRequest{
@@ -401,7 +466,8 @@ func (c *Client) QueryDeleter(ctx context.Context, table string, input *dynamodb
 }
 
 // ScanDeleter deletes all records that match the scan query
-func (c *Client) ScanDeleter(ctx context.Context, table string, input *dynamodb.ScanInput, keyFn KeyExtractor) error {
+func (c *Client) ScanDeleter(ctx context.Context, table string, input *dynamodb.ScanInput, keys []string) error {
+	keyFn := FieldsExtractor(keys...)
 	err := c.ScanIterator(ctx, input, func(out *dynamodb.ScanOutput) error {
 		requests := make([]*dynamodb.WriteRequest, 0, len(out.Items))
 		for _, attrs := range out.Items {
@@ -496,4 +562,40 @@ func (c *Client) ChunkWriteRequests(requests []*dynamodb.WriteRequest) [][]*dyna
 	}
 
 	return results
+}
+
+// limitModifier utilizes the dynamo limit input and treats it as page size. if limit is set it will be unset
+func limitModifier(inputLimit **int64) func(maps *Maps) (trimmed, exitEarly bool) {
+	hasLimit := *inputLimit != nil
+	var limit int
+	if hasLimit {
+		limit = int(**inputLimit)
+		*inputLimit = nil
+	}
+	seen := 0
+
+	return func(outputItems *Maps) (bool, bool) {
+		if hasLimit {
+			var added, broke bool
+			var items []map[string]*dynamodb.AttributeValue
+			for _, i := range *outputItems {
+				seen++
+				if seen > limit {
+					broke = true
+					break
+				}
+
+				added = true
+				items = append(items, i)
+			}
+			if seen > 0 && !added && broke {
+				return broke, false
+			}
+			*outputItems = items
+
+			return broke, true
+		}
+
+		return false, true
+	}
 }

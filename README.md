@@ -101,11 +101,10 @@ result, err := cli.Builder().Table("MyTable").
 
 ***Delete By Query***
 ```go
-primaryKeyExtractor := dyc.FieldsExtractor("PK", "SK")
 err := cli.Builder().Table("MyTable").
   WhereKey("PK = ? AND SK BETWEEN ? AND ?", "key", 1, 1337)
   Where(`'Some'.'Nested'.'Field' = ? AND 'another' = ?`, "cool", true).
-  QueryDelete(ctx, primaryKeyExtractor)
+  QueryDelete(ctx)
 ```
  - deletes all records matching the query
  
@@ -213,7 +212,7 @@ results, err := cli.Builder().
 ```go
 err := cli.Builder().Table("MyTable").
   Where(`'Some'.'Nested'.'Field' = ? AND 'another' = ?`, "cool", true).
-  ScanDelete(ctx, dyc.FieldsExtractor("PK", "SK"))
+  ScanDelete(ctx)
 ```
  - deletes all records matching the scan
  - PK and SK are the partition key and sort key needed to delete the matching records

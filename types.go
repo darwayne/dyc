@@ -7,6 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
+type Map = map[string]*dynamodb.AttributeValue
+type Maps = []Map
+
 // StringSet converts an array of strings to a string set type
 func StringSet(arr ...string) *dynamodb.AttributeValue {
 	return &dynamodb.AttributeValue{
