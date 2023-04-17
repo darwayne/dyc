@@ -2,7 +2,6 @@ package dyc
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strconv"
 	"strings"
@@ -33,15 +32,21 @@ type Builder struct {
 	consistent          *bool
 	client              *Client
 	result              interface{}
+	pageToken           Map
+	keyFn               KeyExtractor
+	primaryKeys         []string
+	lastEvaluatedKey    Map
 }
 
 // NewBuilder creates a new builder
 func NewBuilder() *Builder {
 	return &Builder{
-		valColsIdx: -1,
-		cols:       make(map[string]*string),
-		vals:       make(map[string]*dynamodb.AttributeValue),
-		keys:       make(map[string]*dynamodb.AttributeValue),
+		valColsIdx:  -1,
+		cols:        make(map[string]*string),
+		vals:        make(map[string]*dynamodb.AttributeValue),
+		keys:        make(map[string]*dynamodb.AttributeValue),
+		primaryKeys: []string{"PK", "SK"},
+		keyFn:       PKSKExtractor,
 	}
 }
 
@@ -55,8 +60,22 @@ func (s *Builder) Builder() *Builder {
 	if s.table != "" {
 		b.Table(s.table)
 	}
+	b.WithPrimaryKeys(s.primaryKeys...)
 
 	return b
+}
+
+// WithPrimaryKeys allows you to set alternate primary keys
+// on default we expect PK,SK as primary keys
+func (s *Builder) WithPrimaryKeys(primaryKeys ...string) *Builder {
+	s.primaryKeys = primaryKeys
+	s.keyFn = FieldsExtractor(primaryKeys...)
+	return s
+}
+
+// PageToken returns token that can be used to fetch the next page of results
+func (s *Builder) PageToken() Map {
+	return s.lastEvaluatedKey
 }
 
 // Key allows you to set the key for a given item
@@ -250,11 +269,27 @@ func (s *Builder) Client(client *Client) *Builder {
 	})
 }
 
+// Cursor sets the page token retrieved from PageToken
+func (s *Builder) Cursor(cursor Map) *Builder {
+	s.pageToken = cursor
+	return s
+}
+
 // Sort sets sort as either ascending or descending
 func (s *Builder) Sort(ascending bool) *Builder {
 	return s.update(func() {
 		s.ascending = aws.Bool(ascending)
 	})
+}
+
+// Descending returns results in descending order
+func (s *Builder) Descending() *Builder {
+	return s.Sort(false)
+}
+
+// Ascending returns results in ascending order
+func (s *Builder) Ascending() *Builder {
+	return s.Sort(true)
 }
 
 // ConsistentRead sets the consistent read flag
@@ -295,15 +330,16 @@ func (s *Builder) parseResult(result interface{}, errs ...error) error {
 	}
 
 	rv = rv.Elem()
-	switch rv.Kind() {
+	kind := rv.Kind()
+	switch kind {
 	case reflect.Array, reflect.Slice:
-		raw, ok := result.([]map[string]*dynamodb.AttributeValue)
+		raw, ok := result.(Maps)
 		if !ok {
 			return ErrUnsupportedType
 		}
 		err = dynamodbattribute.UnmarshalListOfMaps(raw, s.result)
 	default:
-		raw, ok := result.(map[string]*dynamodb.AttributeValue)
+		raw, ok := result.(Map)
 		if !ok {
 			return ErrUnsupportedType
 		}
@@ -374,7 +410,7 @@ func (s *Builder) QueryIterate(ctx context.Context, fn func(output *dynamodb.Que
 		return err
 	}
 
-	return s.client.QueryIterator(ctx, &query, fn)
+	return s.client.QueryIteratorV2(ctx, &query, s.primaryKeys, fn)
 }
 
 // QueryAll returns an all results matching the built query
@@ -386,9 +422,12 @@ func (s *Builder) QueryAll(ctx context.Context) ([]map[string]*dynamodb.Attribut
 		return nil, ErrClientNotSet
 	}
 	query, _ := s.ToQuery()
-	var results []map[string]*dynamodb.AttributeValue
-	err := s.client.QueryIterator(ctx, &query, func(output *dynamodb.QueryOutput) error {
+
+	s.lastEvaluatedKey = nil
+	var results Maps
+	err := s.client.QueryIteratorV2(ctx, &query, s.primaryKeys, func(output *dynamodb.QueryOutput) error {
 		results = append(results, output.Items...)
+		s.lastEvaluatedKey = output.LastEvaluatedKey
 
 		return nil
 	})
@@ -407,22 +446,35 @@ func (s *Builder) QuerySingle(ctx context.Context) (map[string]*dynamodb.Attribu
 	query, _ := s.ToQuery()
 	query.Limit = aws.Int64(1)
 
-	earlyExit := errors.New("early exit")
-	var result map[string]*dynamodb.AttributeValue = nil
-	err := s.client.QueryIterator(ctx, &query, func(output *dynamodb.QueryOutput) error {
+	s.lastEvaluatedKey = nil
+	var result Map
+	err := s.client.QueryIteratorV2(ctx, &query, s.primaryKeys, func(output *dynamodb.QueryOutput) error {
 		if len(output.Items) > 0 {
 			result = output.Items[0]
-			return earlyExit
 		}
 
 		return nil
 	})
 
-	if err == earlyExit {
-		err = nil
-	}
-
 	return result, s.parseResult(result, err)
+}
+
+// ScanAll returns all results matching the scan
+func (s *Builder) ScanAll(ctx context.Context) (Maps, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	query, _ := s.ToScan()
+	s.lastEvaluatedKey = nil
+	var results Maps
+	err := s.client.ScanIteratorV2(ctx, &query, s.primaryKeys, func(output *dynamodb.ScanOutput) error {
+		results = append(results, output.Items...)
+		s.lastEvaluatedKey = output.LastEvaluatedKey
+
+		return nil
+	})
+
+	return results, s.parseResult(results, err)
 }
 
 // ScanIterate allows you to query dynamo based on the built object.
@@ -437,7 +489,7 @@ func (s *Builder) ScanIterate(ctx context.Context, fn func(output *dynamodb.Scan
 
 	query, _ := s.ToScan()
 
-	return s.client.ScanIterator(ctx, &query, fn)
+	return s.client.ScanIteratorV2(ctx, &query, s.primaryKeys, fn)
 }
 
 // ParallelScanIterate allows you to do a parallel scan in dynamo based on the built object.
@@ -456,8 +508,7 @@ func (s *Builder) ParallelScanIterate(ctx context.Context, workers int, fn func(
 }
 
 // QueryDelete deletes all records matching the query.
-// note: you must provide a function that will select the relevant Key fields needed for deletion
-func (s *Builder) QueryDelete(ctx context.Context, keyFn KeyExtractor) error {
+func (s *Builder) QueryDelete(ctx context.Context) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -467,12 +518,12 @@ func (s *Builder) QueryDelete(ctx context.Context, keyFn KeyExtractor) error {
 
 	query, _ := s.ToQuery()
 
-	return s.client.QueryDeleter(ctx, s.table, &query, keyFn)
+	return s.client.QueryDeleter(ctx, s.table, &query, s.primaryKeys)
 }
 
 // ScanDelete deletes all records matching the scan.
 // note: you must provide a function that will select the relevant Key fields needed for deletion
-func (s *Builder) ScanDelete(ctx context.Context, keyFn KeyExtractor) error {
+func (s *Builder) ScanDelete(ctx context.Context) error {
 	if s.err != nil {
 		return s.err
 	}
@@ -482,7 +533,7 @@ func (s *Builder) ScanDelete(ctx context.Context, keyFn KeyExtractor) error {
 
 	query, _ := s.ToScan()
 
-	return s.client.ScanDeleter(ctx, s.table, &query, keyFn)
+	return s.client.ScanDeleter(ctx, s.table, &query, s.primaryKeys)
 }
 
 // ToDelete produces a dynamodb.DeleteItemInput value based on configured builder
@@ -563,6 +614,10 @@ func (s *Builder) ToQuery() (dynamodb.QueryInput, error) {
 		query.ConsistentRead = s.consistent
 	}
 
+	if s.pageToken != nil {
+		query.ExclusiveStartKey = s.pageToken
+	}
+
 	return query, nil
 }
 
@@ -604,6 +659,10 @@ func (s *Builder) ToScan() (dynamodb.ScanInput, error) {
 
 	if s.consistent != nil {
 		query.ConsistentRead = s.consistent
+	}
+
+	if s.pageToken != nil {
+		query.ExclusiveStartKey = s.pageToken
 	}
 
 	return query, nil
