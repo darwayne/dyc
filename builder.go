@@ -28,6 +28,7 @@ type Builder struct {
 	table               string
 	index               string
 	limit               int
+	returnVal           *string
 	ascending           *bool
 	consistent          *bool
 	client              *Client
@@ -269,6 +270,11 @@ func (s *Builder) Client(client *Client) *Builder {
 	})
 }
 
+// GetClient returns the underlying client
+func (s *Builder) GetClient() *Client {
+	return s.client
+}
+
 // Cursor sets the page token retrieved from PageToken
 func (s *Builder) Cursor(cursor Map) *Builder {
 	s.pageToken = cursor
@@ -363,8 +369,36 @@ func (s *Builder) PutItem(ctx context.Context, data interface{}) (*dynamodb.PutI
 		return nil, err
 	}
 	output, err := s.client.PutItemWithContext(ctx, &input)
+	if s.returnVal != nil {
+		err = s.parseResult(output.Attributes, err)
+	}
 
 	return output, err
+}
+
+// Return lets you set the dynamodb.ReturnValues for the underlying operation. Use Result to get the returned
+// value attributes parsed to the type you are expected.
+//
+// Valid options are:
+//
+//   - NONE - If Return is not called, or if its value is NONE, then
+//     nothing is returned. (This setting is the default for Return)
+//
+//   - ALL_OLD - Returns all of the attributes of the item, as they appeared
+//     before the UpdateItem or DeleteItem operation.
+//
+//   - UPDATED_OLD - Returns only the updated attributes, as they appeared
+//     before the UpdateItem operation.
+//
+//   - ALL_NEW - Returns all of the attributes of the item, as they appear
+//     after the UpdateItem operation.
+//
+//   - UPDATED_NEW - Returns only the updated attributes, as they appear after
+//     the UpdateItem operation.
+func (s *Builder) Return(val string) *Builder {
+	s.returnVal = &val
+
+	return s
 }
 
 // UpdateItem builds and runs an update query
@@ -378,6 +412,9 @@ func (s *Builder) UpdateItem(ctx context.Context) (*dynamodb.UpdateItemOutput, e
 
 	input, _ := s.ToUpdate()
 	output, err := s.client.UpdateItemWithContext(ctx, &input)
+	if s.returnVal != nil {
+		err = s.parseResult(output.Attributes, err)
+	}
 
 	return output, err
 }
@@ -393,7 +430,12 @@ func (s *Builder) DeleteItem(ctx context.Context) (*dynamodb.DeleteItemOutput, e
 		return nil, ErrClientNotSet
 	}
 
-	return s.client.DeleteItemWithContext(ctx, &input)
+	output, err := s.client.DeleteItemWithContext(ctx, &input)
+	if s.returnVal != nil {
+		err = s.parseResult(output.Attributes, err)
+	}
+
+	return output, err
 }
 
 // QueryIterate allows you to query dynamo based on the built object.
@@ -562,6 +604,9 @@ func (s *Builder) ToDelete() (dynamodb.DeleteItemInput, error) {
 	if len(s.cols) > 0 {
 		request.ExpressionAttributeNames = s.cols
 	}
+	if s.returnVal != nil {
+		request.ReturnValues = s.returnVal
+	}
 
 	return request, nil
 }
@@ -721,6 +766,9 @@ func (s *Builder) ToUpdate() (dynamodb.UpdateItemInput, error) {
 	if s.table != "" {
 		query.TableName = aws.String(s.table)
 	}
+	if s.returnVal != nil {
+		query.ReturnValues = s.returnVal
+	}
 
 	return query, nil
 }
@@ -746,6 +794,9 @@ func (s *Builder) ToPut(item interface{}) (dynamodb.PutItemInput, error) {
 
 	if s.table != "" {
 		query.TableName = aws.String(s.table)
+	}
+	if s.returnVal != nil {
+		query.ReturnValues = s.returnVal
 	}
 
 	var err error

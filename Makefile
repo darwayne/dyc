@@ -7,6 +7,9 @@ dynamo_test_end_point="http://localhost:47801"
 up:
 	docker-compose up -d
 
+down:
+	docker-compose down
+
 # run normal unit and integration tests
 test: test-unit test-integration
 
