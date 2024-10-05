@@ -15,17 +15,47 @@ import (
 )
 
 type Row struct {
-	PK     string
-	SK     string
-	StrMap map[string]string
+	PK       string
+	SK       string
+	StrMap   map[string]string
+	Anything interface{} `json:"anything,omitempty"`
 }
 
 func TestBuilder(t *testing.T) {
+	t.Run("DeleteItem", func(t *testing.T) {
+		t.Run("happy path", func(t *testing.T) {
+			builder := setupBuilder(t)
+			data := genericRow()
+			_, err := builder.PutItem(defaultCtx(), data)
+			require.NoError(t, err)
+
+			var deleted Row
+			_, err = builder.Builder().
+				Return("ALL_OLD").
+				Key("PK", data.PK, "SK", data.SK).
+				Result(&deleted).
+				DeleteItem(defaultCtx())
+			require.NoError(t, err)
+			require.Equal(t, data, deleted)
+		})
+	})
 	t.Run("PutItem", func(t *testing.T) {
 		t.Run("happy path", func(t *testing.T) {
 			builder := setupBuilder(t)
-			_, err := builder.PutItem(defaultCtx(), genericRow())
+			data := genericRow()
+			res, err := builder.PutItem(defaultCtx(), data)
 			require.NoError(t, err)
+			require.Empty(t, res.Attributes)
+
+			builder = builder.Builder().Return("ALL_OLD")
+
+			var result Row
+			data.Anything = nil
+			res, err = builder.Result(&result).PutItem(defaultCtx(), data)
+			require.NoError(t, err)
+			require.NotEmpty(t, res.Attributes)
+			require.NotEmpty(t, result)
+			require.Equal(t, data.PK, result.PK)
 		})
 
 		t.Run("condition should work", func(t *testing.T) {
@@ -333,11 +363,16 @@ func TestBuilder(t *testing.T) {
 			require.NoError(t, err)
 
 			t.Run("should REMOVE as expected", func(t *testing.T) {
+				var updated Row
 				_, err = builder.Builder().Key("PK", expected.PK, "SK", expected.SK).
+					Return("ALL_NEW").
+					Result(&updated).
 					Update(`REMOVE 'StrMap'.'darwayne'`).
 					UpdateItem(defaultCtx())
 
 				require.NoError(t, err)
+				require.NotEmpty(t, updated)
+				require.Equal(t, expected.PK, updated.PK)
 
 				var result Row
 				_, err = builder.Builder().WhereKey(
@@ -348,14 +383,51 @@ func TestBuilder(t *testing.T) {
 				require.NoError(t, err)
 
 				require.Empty(t, result.StrMap)
+				require.Empty(t, updated.StrMap)
 			})
 
 			t.Run("should SET as expected", func(t *testing.T) {
+				_, err = builder.Builder().PutItem(defaultCtx(), expected)
+				require.NoError(t, err)
+				var oldVal Row
 				_, err = builder.Builder().Key("PK", expected.PK, "SK", expected.SK).
+					Return("ALL_OLD").
+					Result(&oldVal).
 					Update(`SET 'StrMap'.'yolo' = ?`, "once").
 					UpdateItem(defaultCtx())
 
 				require.NoError(t, err)
+				require.NotEmpty(t, oldVal)
+				require.Equal(t, oldVal.PK, expected.PK)
+				require.Equal(t, oldVal.StrMap, expected.StrMap)
+
+				var result Row
+				_, err = builder.Builder().WhereKey(
+					"PK = ?", expected.PK).
+					ConsistentRead(true).
+					Result(&result).
+					QuerySingle(defaultCtx())
+
+				require.NoError(t, err)
+
+				require.NotEmpty(t, result.StrMap)
+				require.Equal(t, "once", result.StrMap["yolo"])
+			})
+
+			t.Run("should return only the updated attributes", func(t *testing.T) {
+				_, err = builder.Builder().PutItem(defaultCtx(), expected)
+				require.NoError(t, err)
+				var oldVal Row
+				_, err = builder.Builder().Key("PK", expected.PK, "SK", expected.SK).
+					Return("ALL_OLD").
+					Result(&oldVal).
+					Update(`SET 'StrMap'.'yolo' = ?`, "once").
+					UpdateItem(defaultCtx())
+
+				require.NoError(t, err)
+				require.NotEmpty(t, oldVal)
+				require.Equal(t, oldVal.PK, expected.PK)
+				require.Equal(t, oldVal.StrMap, expected.StrMap)
 
 				var result Row
 				_, err = builder.Builder().WhereKey(
@@ -382,6 +454,7 @@ func genericRow() Row {
 		StrMap: map[string]string{
 			"darwayne": "was here",
 		},
+		Anything: "hey",
 	}
 }
 
